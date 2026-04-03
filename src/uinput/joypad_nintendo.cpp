@@ -187,4 +187,6 @@ void SwitchJoypad::set_triggers(int16_t left, int16_t right) {
 void SwitchJoypad::set_on_rumble(const std::function<void(int, int)> &callback) {
   this->_state->on_rumble = callback;
 }
+
+void SwitchJoypad::set_motion(MOTION_TYPE, float, float, float) {}
 } // namespace inputtino

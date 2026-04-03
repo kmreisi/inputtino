@@ -350,6 +350,11 @@ private:
 
 class SwitchJoypad : public Joypad {
 public:
+  enum MOTION_TYPE : uint8_t {
+    ACCELERATION = 0x01,
+    GYROSCOPE = 0x02
+  };
+
   static Result<SwitchJoypad> create(const DeviceDefinition &device = {
                                          .name = "Wolf Nintendo (virtual) pad",
                                          // https://github.com/torvalds/linux/blob/master/drivers/hid/hid-ids.h#L981
@@ -363,17 +368,30 @@ public:
 
   std::vector<std::string> get_nodes() const override;
 
+  std::string get_mac_address() const;
+
+  std::vector<std::string> get_sys_nodes() const;
+
   void set_pressed_buttons(unsigned int newly_pressed) override;
   void set_triggers(int16_t left, int16_t right) override;
   void set_stick(STICK_POSITION stick_type, short x, short y) override;
+  void set_motion(MOTION_TYPE type, float x, float y, float z);
   void set_on_rumble(const std::function<void(int low_freq, int high_freq)> &callback);
 
 protected:
-  typedef struct XboxOneJoypadState SwitchJoypadState;
+  typedef struct SwitchJoypadState SwitchJoypadState;
   std::shared_ptr<SwitchJoypadState> _state;
 
 private:
-  SwitchJoypad();
+  std::thread _send_input_thread;
+
+  static std::array<unsigned char, 6> generate_mac_address() {
+    auto rand = std::bind(std::uniform_int_distribution<unsigned char>{0, 0xFF},
+                          std::default_random_engine{std::random_device()()});
+    return {rand(), rand(), rand(), rand(), rand(), rand()};
+  };
+
+  SwitchJoypad(std::array<unsigned char, 6> mac_address = generate_mac_address());
 };
 
 class PS5Joypad : public Joypad {
