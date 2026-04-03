@@ -42,7 +42,7 @@ TEST_CASE("uinput DualSense pad: no rich features, safe no-ops, self-describes",
 }
 
 TEST_CASE("uinput Nintendo pad: no motion, self-describes", "[Factory]") {
-  auto created = SwitchJoypad::create();
+  auto created = SwitchJoypadUinput::create();
   REQUIRE(created);
   auto joypad = std::move(*created);
 
@@ -71,6 +71,7 @@ TEST_CASE("Joypad::create returns a usable pad through the Joypad base", "[Facto
 #ifdef INPUTTINO_NO_UHID
 TEST_CASE("Without uhid, PS5Joypad is the uinput pad", "[Factory]") {
   STATIC_REQUIRE(std::is_same_v<PS5Joypad, PS5JoypadUinput>);
+  STATIC_REQUIRE(std::is_same_v<SwitchJoypad, SwitchJoypadUinput>);
 }
 #endif
 
@@ -80,13 +81,19 @@ TEST_CASE("Joypad::create picks the rich uhid backend when preferred", "[Factory
     SKIP("This host has no accessible /dev/uhid");
   }
 
-  // The uhid DualSense forwards motion; that's the observable difference from
-  // its uinput fallback. (The uhid Switch Pro backend lands in a follow-up PR.)
+  // The uhid DualSense / Switch Pro pads forward motion; that's the observable
+  // difference from their uinput fallbacks.
   auto ps = Joypad::create(Joypad::TYPE::PS, /* prefer_uhid */ true);
   REQUIRE(ps);
   REQUIRE((*ps)->supports_motion());
   REQUIRE(dynamic_cast<PS5Joypad *>((*ps).get()) != nullptr);
   // Reaches PS5Joypad::set_motion through the base class.
   (*ps)->set_motion(Joypad::GYROSCOPE, 0.f, 1.f, 2.f);
+
+  auto nintendo = Joypad::create(Joypad::TYPE::NINTENDO, /* prefer_uhid */ true);
+  REQUIRE(nintendo);
+  REQUIRE((*nintendo)->supports_motion());
+  REQUIRE(dynamic_cast<SwitchJoypad *>((*nintendo).get()) != nullptr);
+  (*nintendo)->set_motion(Joypad::GYROSCOPE, 0.f, 1.f, 2.f);
 }
 #endif

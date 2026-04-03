@@ -183,7 +183,7 @@ TEST_CASE_METHOD(SDLTestsFixture, "XBOX Joypad", "[SDL]") {
 
 TEST_CASE_METHOD(SDLTestsFixture, "Nintendo Joypad", "[SDL]") {
   // Create the controller
-  auto joypad = std::move(*SwitchJoypad::create());
+  auto joypad = std::move(*SwitchJoypadUinput::create());
 
   std::this_thread::sleep_for(150ms);
 

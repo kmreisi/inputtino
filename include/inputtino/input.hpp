@@ -18,7 +18,8 @@ namespace inputtino {
 /**
  * Whether this process can create uhid devices, i.e. whether `/dev/uhid` opens
  * read-write. uhid is what the full DualSense (PS5Joypad: touchpad, motion,
- * LED, adaptive triggers) needs; without it only the uinput pads work.
+ * LED, adaptive triggers) and the Switch Pro pad with motion (SwitchJoypad)
+ * need; without it only the uinput pads work.
  *
  * The probe runs once and its result is cached for the process. It only tells
  * that the node opens: the kernel can still refuse to create a device later
@@ -356,7 +357,8 @@ public:
    * the library built with USE_UHID) this tries the uhid PS5Joypad first, and
    * falls back to the uinput PS5JoypadUinput if that can't be created (no
    * /dev/uhid, or the kernel refuses it); a fallback is reported on stderr.
-   * TYPE::XBOX and TYPE::NINTENDO are always uinput.
+   * TYPE::NINTENDO does the same with SwitchJoypad / SwitchJoypadUinput.
+   * TYPE::XBOX is always uinput.
    *
    * NOTE: when `prefer_uhid` is left out it defaults to is_uhid_supported(),
    * which probes /dev/uhid. Pass it explicitly to decide yourself.
@@ -480,13 +482,18 @@ private:
   XboxOneJoypad();
 };
 
-class SwitchJoypad : public Joypad {
+/**
+ * Switch Pro pad over uinput: buttons, sticks, triggers and rumble, no motion.
+ * It only needs uinput, so Joypad::create() falls back to it when the uhid
+ * SwitchJoypad can't be created. In a USE_UHID=OFF build it is also SwitchJoypad.
+ */
+class SwitchJoypadUinput : public Joypad {
 public:
-  static Result<SwitchJoypad> create(const DeviceDefinition &device = default_definition(TYPE::NINTENDO));
-  SwitchJoypad(SwitchJoypad &&j) : _state(nullptr) {
+  static Result<SwitchJoypadUinput> create(const DeviceDefinition &device = default_definition(TYPE::NINTENDO));
+  SwitchJoypadUinput(SwitchJoypadUinput &&j) noexcept : _state(nullptr) {
     std::swap(j._state, _state);
   }
-  ~SwitchJoypad() override;
+  ~SwitchJoypadUinput() override;
 
   std::vector<std::string> get_nodes() const override;
   std::vector<UdevEvent> get_udev_events() const override;
@@ -498,11 +505,11 @@ public:
   void set_on_rumble(const std::function<void(int low_freq, int high_freq)> &callback) override;
 
 protected:
-  typedef struct XboxOneJoypadState SwitchJoypadState;
-  std::shared_ptr<SwitchJoypadState> _state;
+  typedef struct SwitchJoypadUinputState SwitchJoypadUinputState;
+  std::shared_ptr<SwitchJoypadUinputState> _state;
 
 private:
-  SwitchJoypad();
+  SwitchJoypadUinput();
 };
 
 /**
@@ -592,6 +599,64 @@ private:
   };
 
   PS5Joypad(uint16_t vendor_id, std::array<unsigned char, 6> mac_address = generate_mac_address());
+};
+#endif
+
+#ifdef INPUTTINO_NO_UHID
+// Built without uhid (USE_UHID=OFF): SwitchJoypad is the uinput pad, as it always was in such builds.
+using SwitchJoypad = SwitchJoypadUinput;
+#else
+/**
+ * Switch Pro pad over uhid, driven by the kernel's hid-nintendo: buttons,
+ * sticks, triggers, rumble and motion.
+ */
+class SwitchJoypad : public Joypad {
+public:
+  static Result<SwitchJoypad> create(const DeviceDefinition &device = default_definition(TYPE::NINTENDO));
+  SwitchJoypad(SwitchJoypad &&j) noexcept : _state(nullptr) {
+    std::swap(j._state, _state);
+    // The report thread is joined by the destructor, so it has to move with the state it writes to.
+    std::swap(j._send_input_thread, _send_input_thread);
+  }
+  ~SwitchJoypad() override;
+
+  std::vector<std::string> get_nodes() const override;
+  std::vector<UdevEvent> get_udev_events() const override;
+  std::vector<UdevHwDbEntry> get_udev_hw_db_entries() const override;
+
+  std::string get_mac_address() const;
+
+  std::vector<std::string> get_sys_nodes() const;
+
+  void set_pressed_buttons(unsigned int newly_pressed) override;
+  void set_triggers(int16_t left, int16_t right) override;
+  void set_stick(STICK_POSITION stick_type, short x, short y) override;
+  void set_on_rumble(const std::function<void(int low_freq, int high_freq)> &callback) override;
+
+  bool supports_motion() const override {
+    return true;
+  }
+
+  /**
+   * Takes the same values as PS5Joypad::set_motion, so a caller can feed every
+   * pad the same way.
+   */
+  void set_motion(MOTION_TYPE type, float x, float y, float z) override;
+
+protected:
+  typedef struct SwitchJoypadState SwitchJoypadState;
+  std::shared_ptr<SwitchJoypadState> _state;
+
+private:
+  std::thread _send_input_thread;
+
+  static std::array<unsigned char, 6> generate_mac_address() {
+    auto rand = std::bind(std::uniform_int_distribution<unsigned char>{0, 0xFF},
+                          std::default_random_engine{std::random_device()()});
+    return {rand(), rand(), rand(), rand(), rand(), rand()};
+  };
+
+  SwitchJoypad(std::array<unsigned char, 6> mac_address = generate_mac_address());
 };
 #endif
 } // namespace inputtino

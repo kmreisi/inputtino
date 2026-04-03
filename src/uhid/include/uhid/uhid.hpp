@@ -7,6 +7,8 @@
 #include <iostream>
 #include <linux/uhid.h>
 #include <memory>
+#include <optional>
+#include <array>
 #include <poll.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -103,7 +105,7 @@ static void set_c_str(const std::string &str, unsigned char *c_str) {
 
 constexpr int UHID_POLL_TIMEOUT = 500; // ms
 
-inputtino::Result<Device> Device::create(const DeviceDefinition &definition,
+inline inputtino::Result<Device> Device::create(const DeviceDefinition &definition,
                                          const std::function<void(const uhid_event &ev, int fd)> &on_event) {
 
   int fd = open("/dev/uhid", O_RDWR | O_CLOEXEC);
@@ -164,6 +166,21 @@ inputtino::Result<Device> Device::create(const DeviceDefinition &definition,
     return inputtino::Error(res.getErrorMessage());
   }
 }
+
+/**
+ * Parse a "xx:xx:xx:xx:xx:xx" address, nullopt when it isn't one.
+ */
+std::optional<std::array<unsigned char, 6>> parse_mac(const std::string &str);
+
+/**
+ * Format an address as "xx:xx:xx:xx:xx:xx" (lowercase, like the kernel's uniq).
+ */
+std::string format_mac(const std::array<unsigned char, 6> &mac);
+
+/**
+ * Find the sysfs input nodes of the UHID device with this vendor ID and address.
+ */
+std::vector<std::string> find_uhid_sys_nodes(uint16_t vendor_id, const std::string &mac);
 
 /**
  * Map sysfs input node paths to /dev/input/ device paths (event*, js*).

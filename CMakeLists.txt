@@ -119,10 +119,10 @@ if (UNIX AND NOT APPLE)
             "src/uinput/touchscreen.cpp"
             "src/uinput/trackpad.cpp")
 
-    # The uinput DualSense (PS5JoypadUinput) is always built, as the fallback for hosts without uhid.
+    # The uinput DualSense and Switch pads are always built, as the fallback for hosts without uhid.
     if (USE_UHID)
         message("Using uhid implementation for DualSense controller")
-        list(APPEND SRC_LIST "src/uhid/joypad_ps5.cpp")
+        list(APPEND SRC_LIST "src/uhid/joypad_ps5.cpp" "src/uhid/joypad_switch.cpp" "src/uhid/uhid.cpp")
         target_include_directories(libinputtino PUBLIC "src/uhid/include/")
     else ()
         message("Using uinput implementation for DualSense controller")
