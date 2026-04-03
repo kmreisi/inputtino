@@ -109,7 +109,6 @@ set(PUBLIC_HEADERS
 
 if (UNIX AND NOT APPLE)
     list(APPEND SRC_LIST
-            "src/uinput/joypad_nintendo.cpp"
             "src/uinput/joypad_xbox.cpp"
             "src/uinput/keyboard.cpp"
             "src/uinput/mouse.cpp"
@@ -120,10 +119,14 @@ if (UNIX AND NOT APPLE)
     if (USE_UHID)
         message("Using uhid implementation for DualSense controller")
         list(APPEND SRC_LIST "src/uhid/joypad_ps5.cpp")
+        message("Using uhid implementation for Nintendo controller")
+        list(APPEND SRC_LIST "src/uhid/joypad_switch.cpp")
         target_include_directories(libinputtino PUBLIC "src/uhid/include/")
     else ()
         message("Using uinput implementation for DualSense controller")
         list(APPEND SRC_LIST "src/uinput/joypad_ps.cpp")
+        message("Using uinput implementation for Nintendo controller")
+        list(APPEND SRC_LIST "src/uinput/joypad_nintendo.cpp")
     endif ()
 
     target_sources(libinputtino PRIVATE ${SRC_LIST})

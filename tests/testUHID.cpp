@@ -1,12 +1,16 @@
 #include "catch2/catch_all.hpp"
 #include <crc32.hpp>
+#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <inputtino/input.hpp>
 #include <iostream>
+#include <poll.h>
 #include <SDL.h>
 #include <thread>
 #include <uhid/ps5.hpp>
+#include <uhid/switch.hpp>
+#include <unistd.h>
 
 using Catch::Matchers::Contains;
 using Catch::Matchers::ContainsSubstring;
@@ -15,6 +19,81 @@ using Catch::Matchers::SizeIs;
 using Catch::Matchers::WithinAbs;
 using namespace inputtino;
 using namespace std::chrono_literals;
+
+static std::filesystem::path wait_for_hidraw_by_uniq(const std::string &uniq,
+                                                     uint16_t vendor_id,
+                                                     uint16_t product_id,
+                                                     std::chrono::milliseconds timeout = 1500ms) {
+  auto deadline = std::chrono::steady_clock::now() + timeout;
+  std::ostringstream expected_hid_id;
+  expected_hid_id << "0005:" << std::uppercase << std::hex << std::setfill('0') << std::setw(8)
+                  << static_cast<unsigned int>(vendor_id) << ":" << std::setw(8)
+                  << static_cast<unsigned int>(product_id);
+
+  while (std::chrono::steady_clock::now() < deadline) {
+    for (const auto &entry : std::filesystem::directory_iterator("/sys/class/hidraw")) {
+      std::ifstream uevent(entry.path() / "device" / "uevent");
+      if (!uevent.is_open()) {
+        continue;
+      }
+
+      std::string line;
+      bool uniq_match = false;
+      bool hid_id_match = false;
+      while (std::getline(uevent, line)) {
+        if (line == "HID_UNIQ=" + uniq) {
+          uniq_match = true;
+        }
+        if (line == "HID_ID=" + expected_hid_id.str()) {
+          hid_id_match = true;
+        }
+      }
+      if (uniq_match && hid_id_match) {
+        return std::filesystem::path("/dev") / entry.path().filename().string();
+      }
+    }
+    std::this_thread::sleep_for(50ms);
+  }
+
+  return {};
+}
+
+static std::vector<uint8_t> read_hidraw_report(const std::filesystem::path &hidraw_path,
+                                               std::chrono::milliseconds timeout = 1500ms) {
+  int fd = open(hidraw_path.c_str(), O_RDONLY | O_NONBLOCK);
+  REQUIRE(fd >= 0);
+
+  std::vector<uint8_t> report(sizeof(uhid::switch_input_report));
+  auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (std::chrono::steady_clock::now() < deadline) {
+    pollfd pfd = {.fd = fd, .events = POLLIN, .revents = 0};
+    if (poll(&pfd, 1, 50) <= 0) {
+      continue;
+    }
+
+    auto bytes = read(fd, report.data(), report.size());
+    if (bytes == static_cast<ssize_t>(report.size()) && report[0] == uhid::SWITCH_INPUT_REPORT_STANDARD_FULL) {
+      close(fd);
+      return report;
+    }
+  }
+
+  close(fd);
+  FAIL("Timed out waiting for hidraw Switch input report");
+  return {};
+}
+
+static std::array<uint8_t, 3> report_buttons(const std::vector<uint8_t> &report) {
+  return {report[3], report[4], report[5]};
+}
+
+static std::array<uint8_t, 3> report_left_stick(const std::vector<uint8_t> &report) {
+  return {report[6], report[7], report[8]};
+}
+
+static std::array<uint8_t, 3> report_right_stick(const std::vector<uint8_t> &report) {
+  return {report[9], report[10], report[11]};
+}
 
 static void flush_sdl_events() {
   SDL_JoystickUpdate();
@@ -455,6 +534,53 @@ TEST_CASE_METHOD(SDLTestsFixture, "PS Joypad", "[SDL],[PS]") {
   }
 
   SDL_GameControllerClose(gc);
+}
+
+TEST_CASE("Switch Joypad raw HID reports", "[UHID],[Switch]") {
+  DeviceDefinition def = {
+      .name = "Wolf Nintendo (virtual) pad",
+      .vendor_id = 0x057E,
+      .product_id = 0x2009,
+      .version = 0x8111,
+  };
+  auto joypad = std::move(*SwitchJoypad::create(def));
+
+  std::this_thread::sleep_for(150ms);
+
+  auto hidraw = wait_for_hidraw_by_uniq(joypad.get_mac_address(), def.vendor_id, def.product_id);
+  REQUIRE_FALSE(hidraw.empty());
+  REQUIRE(std::filesystem::exists(hidraw));
+
+  auto idle = read_hidraw_report(hidraw);
+  REQUIRE(idle[0] == uhid::SWITCH_INPUT_REPORT_STANDARD_FULL);
+  REQUIRE(idle[2] == 0x60);
+  REQUIRE(report_buttons(idle) == std::array<uint8_t, 3>{0x00, 0x80, 0x00});
+  REQUIRE(report_left_stick(idle) == std::array<uint8_t, 3>{0x00, 0x08, 0x80});
+  REQUIRE(report_right_stick(idle) == std::array<uint8_t, 3>{0x00, 0x08, 0x80});
+
+  joypad.set_stick(Joypad::LS, 1000, 2000);
+
+  bool saw_changed_left_stick = false;
+  for (int i = 0; i < 10; ++i) {
+    auto report = read_hidraw_report(hidraw, 300ms);
+    if (report_left_stick(report) != std::array<uint8_t, 3>{0x00, 0x08, 0x80}) {
+      saw_changed_left_stick = true;
+      break;
+    }
+  }
+  REQUIRE(saw_changed_left_stick);
+
+  joypad.set_pressed_buttons(Joypad::A);
+
+  bool saw_changed_buttons = false;
+  for (int i = 0; i < 10; ++i) {
+    auto report = read_hidraw_report(hidraw, 300ms);
+    if (report_buttons(report) != std::array<uint8_t, 3>{0x00, 0x80, 0x00}) {
+      saw_changed_buttons = true;
+      break;
+    }
+  }
+  REQUIRE(saw_changed_buttons);
 }
 
 TEST_CASE("Bluetooth CRC32", "[PS]") {

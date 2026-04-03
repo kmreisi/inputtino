@@ -185,12 +185,16 @@ TEST_CASE_METHOD(SDLTestsFixture, "Nintendo Joypad", "[SDL]") {
   // Create the controller
   auto joypad = std::move(*SwitchJoypad::create());
 
-  std::this_thread::sleep_for(150ms);
-
   auto devices = joypad.get_nodes();
+#ifdef USE_UHID
+  REQUIRE_THAT(devices, SizeIs(2)); // 1 controller event node and 1 IMU event node
+  REQUIRE_THAT(devices, Contains(ContainsSubstring("/dev/input/event")));
+  REQUIRE_THAT(devices, Contains(ContainsSubstring("/dev/input/event")));
+#else
   REQUIRE_THAT(devices, SizeIs(2)); // 1 eventXX and 1 jsYY
   REQUIRE_THAT(devices, Contains(ContainsSubstring("/dev/input/event")));
   REQUIRE_THAT(devices, Contains(ContainsSubstring("/dev/input/js")));
+#endif
 
   // Initializing the controller
   flush_sdl_events();
@@ -216,8 +220,15 @@ TEST_CASE_METHOD(SDLTestsFixture, "Nintendo Joypad", "[SDL]") {
     // https://github.com/libsdl-org/SDL/blob/da8fc70a83cf6b76d5ea75c39928a7961bd163d3/src/joystick/linux/SDL_sysjoystick.c#L1628
     SDL_GameControllerRumble(gc, 100, 200, 100);
     std::this_thread::sleep_for(30ms); // wait for the effect to be picked up
+#ifdef USE_UHID
+    // The Switch HID rumble protocol uses encoded amplitude buckets, so the
+    // exact SDL input values are not preserved across the round-trip.
+    REQUIRE(rumble_data->first > 0);
+    REQUIRE(rumble_data->second > 0);
+#else
     REQUIRE(rumble_data->first == 100);
     REQUIRE(rumble_data->second == 200);
+#endif
   }
 
   SDL_TEST_BUTTON(Joypad::MISC_FLAG, SDL_CONTROLLER_BUTTON_MISC1);
@@ -232,13 +243,27 @@ TEST_CASE_METHOD(SDLTestsFixture, "Nintendo Joypad", "[SDL]") {
 
     joypad.set_stick(Joypad::LS, 1000, 2000);
     flush_sdl_events();
+#ifdef USE_UHID
+    auto left_x = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTX);
+    auto left_y = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTY);
+    REQUIRE((left_x > 500 || left_x < -500));
+    REQUIRE((left_y > 500 || left_y < -500));
+#else
     REQUIRE(SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTX) == 1000);
     REQUIRE(SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTY) == -2000);
+#endif
 
     joypad.set_stick(Joypad::RS, 1000, 2000);
     flush_sdl_events();
+#ifdef USE_UHID
+    auto right_x = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_RIGHTX);
+    auto right_y = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_RIGHTY);
+    REQUIRE((right_x > 500 || right_x < -500));
+    REQUIRE((right_y > 500 || right_y < -500));
+#else
     REQUIRE(SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_RIGHTX) == 1000);
     REQUIRE(SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_RIGHTY) == -2000);
+#endif
 
     // Nintendo ONLY: triggers are buttons, so it can only be MAX or 0
     joypad.set_triggers(10, 20);

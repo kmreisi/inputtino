@@ -291,6 +291,9 @@ enum INPUTTINO_JOYPAD_MOTION_TYPE : unsigned short {
   GYROSCOPE = 0x02
 };
 
+LIBINPUTTINO_EXPORT void inputtino_joypad_switch_set_motion(
+    InputtinoSwitchJoypad *joypad, enum INPUTTINO_JOYPAD_MOTION_TYPE motion_type, float x, float y, float z);
+
 LIBINPUTTINO_EXPORT void inputtino_joypad_ps5_set_motion(
     InputtinoPS5Joypad *joypad, enum INPUTTINO_JOYPAD_MOTION_TYPE motion_type, float x, float y, float z);
 

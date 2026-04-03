@@ -46,6 +46,16 @@ void inputtino_joypad_switch_set_stick(InputtinoSwitchJoypad *joypad,
   }
 }
 
+void inputtino_joypad_switch_set_motion(
+    InputtinoSwitchJoypad *joypad, enum INPUTTINO_JOYPAD_MOTION_TYPE motion_type, float x, float y, float z) {
+  if (joypad) {
+    reinterpret_cast<inputtino::SwitchJoypad *>(joypad)->set_motion(inputtino::SwitchJoypad::MOTION_TYPE(motion_type),
+                                                                    x,
+                                                                    y,
+                                                                    z);
+  }
+}
+
 void inputtino_joypad_switch_set_on_rumble(InputtinoSwitchJoypad *joypad,
                                            InputtinoJoypadRumbleFn rumble_fn,
                                            void *user_data) {
