@@ -1,6 +1,7 @@
 #pragma once
 #include <functional>
 #include <inputtino/input.hpp>
+#include <mutex>
 #include <optional>
 #include <uhid/ps5.hpp>
 #include <uhid/switch.hpp>
@@ -9,10 +10,24 @@
 namespace inputtino {
 struct SwitchJoypadState {
   std::shared_ptr<uhid::Device> dev;
-  unsigned char mac_address[6] = {0x02, 0x57, 0x7E, 0x00, 0x00, 0x01};
+  std::string mac;
+  unsigned char mac_raw[6] = {};
   uint16_t vendor_id;
   uint16_t product_id;
-  uhid::switch_input_report current_state = {};
+
+  // Protects all mutable controller state below (buttons, sticks, imu, timer).
+  // Must be held by any thread that reads or writes these fields, including
+  // the background repeat-report thread and the API caller threads.
+  std::mutex mtx;
+
+  // Named controller state — PS5-style direct fields, packed into wire format in send_report().
+  uint8_t buttons[3] = {};
+  uint16_t lx = uhid::SWITCH_AXIS_CENTER;
+  uint16_t ly = uhid::SWITCH_AXIS_CENTER;
+  uint16_t rx = uhid::SWITCH_AXIS_CENTER;
+  uint16_t ry = uhid::SWITCH_AXIS_CENTER;
+  uhid::switch_imu_sample imu[3] = {};
+
   uint8_t timer = 0;
   uint8_t report_mode = uhid::SWITCH_REPORT_MODE_STANDARD_FULL;
   bool imu_enabled = false;
