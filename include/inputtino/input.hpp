@@ -368,7 +368,7 @@ public:
 
   std::vector<std::string> get_nodes() const override;
 
-  std::string get_mac_address() const;
+  const std::string &get_mac_address() const;
 
   std::vector<std::string> get_sys_nodes() const;
 
@@ -385,13 +385,7 @@ protected:
 private:
   std::thread _send_input_thread;
 
-  static std::array<unsigned char, 6> generate_mac_address() {
-    auto rand = std::bind(std::uniform_int_distribution<unsigned char>{0, 0xFF},
-                          std::default_random_engine{std::random_device()()});
-    return {rand(), rand(), rand(), rand(), rand(), rand()};
-  };
-
-  SwitchJoypad(std::array<unsigned char, 6> mac_address = generate_mac_address());
+  SwitchJoypad(std::string mac);
 };
 
 class PS5Joypad : public Joypad {
