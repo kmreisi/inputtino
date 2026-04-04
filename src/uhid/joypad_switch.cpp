@@ -392,7 +392,6 @@ Result<SwitchJoypad> SwitchJoypad::create(const DeviceDefinition &device) {
       std::this_thread::sleep_for(std::chrono::milliseconds(15));
     }
   });
-  joypad._send_input_thread.detach();
 
   // Keep the node-discovery path simple and PS5-like by only returning the
   // device once the kernel has exposed its input nodes in sysfs.

@@ -361,8 +361,9 @@ public:
                                          .vendor_id = 0x057e,
                                          .product_id = 0x2009,
                                          .version = 0x8111});
-  SwitchJoypad(SwitchJoypad &&j) : _state(nullptr) {
+  SwitchJoypad(SwitchJoypad &&j) noexcept : _state(nullptr) {
     std::swap(j._state, _state);
+    std::swap(j._send_input_thread, _send_input_thread);
   }
   ~SwitchJoypad() override;
 
