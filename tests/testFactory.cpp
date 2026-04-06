@@ -75,6 +75,16 @@ TEST_CASE("Without uhid, PS5Joypad is the uinput pad", "[Factory]") {
 }
 #endif
 
+TEST_CASE("Joypad::create routes Joy-Con L/R through the Nintendo backend", "[Factory]") {
+  // Deterministic uinput path: the new enum values just have to route through
+  // the factory (no "unknown Joypad::TYPE") and produce a self-describing pad.
+  for (auto type : {Joypad::TYPE::JOYCON_LEFT, Joypad::TYPE::JOYCON_RIGHT}) {
+    auto jc = Joypad::create(type, /* prefer_uhid */ false);
+    REQUIRE(jc);
+    REQUIRE_FALSE((*jc)->get_udev_events().empty());
+  }
+}
+
 #ifdef USE_UHID
 TEST_CASE("Joypad::create picks the rich uhid backend when preferred", "[Factory][UHID]") {
   if (!is_uhid_supported()) {
@@ -95,5 +105,24 @@ TEST_CASE("Joypad::create picks the rich uhid backend when preferred", "[Factory
   REQUIRE((*nintendo)->supports_motion());
   REQUIRE(dynamic_cast<SwitchJoypad *>((*nintendo).get()) != nullptr);
   (*nintendo)->set_motion(Joypad::GYROSCOPE, 0.f, 1.f, 2.f);
+}
+
+TEST_CASE("Joypad::create gives Joy-Con L/R the right hid-nintendo product id", "[Factory][UHID]") {
+  if (!is_uhid_supported()) {
+    SKIP("This host has no accessible /dev/uhid");
+  }
+  // The factory owns the Joy-Con identity (see default_definition); confirm the
+  // L/R product ids reach the uhid SwitchJoypad that hid-nintendo keys off.
+  auto left = Joypad::create(Joypad::TYPE::JOYCON_LEFT, /* prefer_uhid */ true);
+  REQUIRE(left);
+  auto *swl = dynamic_cast<SwitchJoypad *>((*left).get());
+  REQUIRE(swl != nullptr);
+  REQUIRE(swl->get_product_id() == 0x2006);
+
+  auto right = Joypad::create(Joypad::TYPE::JOYCON_RIGHT, /* prefer_uhid */ true);
+  REQUIRE(right);
+  auto *swr = dynamic_cast<SwitchJoypad *>((*right).get());
+  REQUIRE(swr != nullptr);
+  REQUIRE(swr->get_product_id() == 0x2007);
 }
 #endif
