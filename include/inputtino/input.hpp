@@ -377,6 +377,10 @@ public:
   void set_pressed_buttons(unsigned int newly_pressed) override;
   void set_triggers(int16_t left, int16_t right) override;
   void set_stick(STICK_POSITION stick_type, short x, short y) override;
+  /**
+   * Accel: m/s^2 (inclusive of gravity).  Gyro: deg/s.
+   * Axes follow SDL convention; internally remapped to hid-nintendo's native frame.
+   */
   void set_motion(MOTION_TYPE type, float x, float y, float z);
   void set_on_rumble(const std::function<void(int low_freq, int high_freq)> &callback);
 
@@ -427,6 +431,8 @@ public:
    *
    * The x/y/z axis assignments follow SDL's convention documented here:
    * https://github.com/libsdl-org/SDL/blob/96720f335002bef62115e39327940df454d78f6c/include/SDL3/SDL_sensor.h#L80-L124
+   *
+   * TODO: gyro_resolution (1145) is calibrated for rad/s, not deg/s as stated above.
    */
   void set_motion(MOTION_TYPE type, float x, float y, float z);
 

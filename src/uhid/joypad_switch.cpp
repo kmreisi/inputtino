@@ -507,14 +507,17 @@ void SwitchJoypad::set_pressed_buttons(unsigned int pressed) {
     buttons[1] = SWITCH_BUTTON_STATUS1_BASE;
     buttons[2] = 0;
 
-    if (Y & pressed)
-      buttons[0] |= 0x01;
+    // Map by position (matching PS5Joypad's pattern), not by label.
+    // Xbox A (bottom) → Switch B (bottom), Xbox B (right) → Switch A (right),
+    // Xbox X (left) → Switch Y (left),    Xbox Y (top) → Switch X (top).
     if (X & pressed)
-      buttons[0] |= 0x02;
-    if (B & pressed)
-      buttons[0] |= 0x04;
+      buttons[0] |= 0x01; // Switch Y
+    if (Y & pressed)
+      buttons[0] |= 0x02; // Switch X
     if (A & pressed)
-      buttons[0] |= 0x08;
+      buttons[0] |= 0x04; // Switch B
+    if (B & pressed)
+      buttons[0] |= 0x08; // Switch A
     if (RIGHT_BUTTON & pressed)
       buttons[0] |= 0x40;
 
@@ -580,31 +583,41 @@ void SwitchJoypad::set_stick(Joypad::STICK_POSITION stick_type, short x, short y
 }
 
 void SwitchJoypad::set_motion(MOTION_TYPE type, float x, float y, float z) {
+  // Remap from SDL coordinate frame to hid-nintendo's native frame.
+  // SDL applies a Nintendo-specific transform when reading:
+  //   SDL_X = -kernel_Y,  SDL_Y = kernel_Z,  SDL_Z = -kernel_X
+  // Invert:  kernel_X = -SDL_Z,  kernel_Y = -SDL_X,  kernel_Z = SDL_Y
+  // Right Joy-Con: hid-nintendo negates Y/Z, so counter-negate.
+  bool is_right_joycon = this->_state->product_id == 0x2007;
+  float nx = -z;
+  float ny = is_right_joycon ? x : -x;
+  float nz = is_right_joycon ? -y : y;
+
   int16_t sx = 0;
   int16_t sy = 0;
   int16_t sz = 0;
 
   if (type == ACCELERATION) {
     sx = static_cast<int16_t>(
-        std::clamp(std::lround((x / uhid::SWITCH_STANDARD_GRAVITY_CONST) * uhid::SWITCH_ACCEL_SCALE),
+        std::clamp(std::lround((nx / uhid::SWITCH_STANDARD_GRAVITY_CONST) * uhid::SWITCH_ACCEL_SCALE),
                    static_cast<long>(INT16_MIN),
                    static_cast<long>(INT16_MAX)));
     sy = static_cast<int16_t>(
-        std::clamp(std::lround((y / uhid::SWITCH_STANDARD_GRAVITY_CONST) * uhid::SWITCH_ACCEL_SCALE),
+        std::clamp(std::lround((ny / uhid::SWITCH_STANDARD_GRAVITY_CONST) * uhid::SWITCH_ACCEL_SCALE),
                    static_cast<long>(INT16_MIN),
                    static_cast<long>(INT16_MAX)));
     sz = static_cast<int16_t>(
-        std::clamp(std::lround((z / uhid::SWITCH_STANDARD_GRAVITY_CONST) * uhid::SWITCH_ACCEL_SCALE),
+        std::clamp(std::lround((nz / uhid::SWITCH_STANDARD_GRAVITY_CONST) * uhid::SWITCH_ACCEL_SCALE),
                    static_cast<long>(INT16_MIN),
                    static_cast<long>(INT16_MAX)));
   } else {
-    sx = static_cast<int16_t>(std::clamp(std::lround(x * uhid::SWITCH_GYRO_SCALE),
+    sx = static_cast<int16_t>(std::clamp(std::lround(nx * uhid::SWITCH_GYRO_SCALE),
                                          static_cast<long>(INT16_MIN),
                                          static_cast<long>(INT16_MAX)));
-    sy = static_cast<int16_t>(std::clamp(std::lround(y * uhid::SWITCH_GYRO_SCALE),
+    sy = static_cast<int16_t>(std::clamp(std::lround(ny * uhid::SWITCH_GYRO_SCALE),
                                          static_cast<long>(INT16_MIN),
                                          static_cast<long>(INT16_MAX)));
-    sz = static_cast<int16_t>(std::clamp(std::lround(z * uhid::SWITCH_GYRO_SCALE),
+    sz = static_cast<int16_t>(std::clamp(std::lround(nz * uhid::SWITCH_GYRO_SCALE),
                                          static_cast<long>(INT16_MIN),
                                          static_cast<long>(INT16_MAX)));
   }
