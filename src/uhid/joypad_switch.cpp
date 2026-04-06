@@ -14,13 +14,6 @@ namespace inputtino {
 
 namespace {
 
-std::string lowercase(std::string value) {
-  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-    return static_cast<char>(std::tolower(c));
-  });
-  return value;
-}
-
 std::string uppercase(std::string value) {
   std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
     return static_cast<char>(std::toupper(c));
@@ -45,33 +38,26 @@ int scale_axis(short value) {
 }
 
 // Pack two 12-bit values into 3 bytes: X in bits 0-11, Y in bits 12-23.
-void pack_stick(uint8_t out[3], uint16_t x, uint16_t y) {
+void pack_12bit_pair(uint8_t *out, uint16_t x, uint16_t y) {
   out[0] = static_cast<uint8_t>(x & 0xFF);
   out[1] = static_cast<uint8_t>(((x >> 8) & 0x0F) | ((y & 0x0F) << 4));
   out[2] = static_cast<uint8_t>((y >> 4) & 0xFF);
 }
 
-// Write a 12-bit XY pair into 3 bytes at data+offset.
-void write12(uint8_t *data, int offset, uint16_t x, uint16_t y) {
-  data[offset + 0] = static_cast<uint8_t>(x & 0xFF);
-  data[offset + 1] = static_cast<uint8_t>(((x >> 8) & 0x0F) | ((y & 0x0F) << 4));
-  data[offset + 2] = static_cast<uint8_t>((y >> 4) & 0xFF);
-}
-
 // Left stick factory calibration at 0x603D: hid-nintendo parses as
 // (max_above, center, min_below).
 void fill_left_stick_calibration(uint8_t *data) {
-  write12(data, 0, 2047, 2047); // max_above
-  write12(data, 3, 2048, 2048); // center
-  write12(data, 6, 2048, 2048); // min_below
+  pack_12bit_pair(data + 0, 2047, 2047); // max_above
+  pack_12bit_pair(data + 3, 2048, 2048); // center
+  pack_12bit_pair(data + 6, 2048, 2048); // min_below
 }
 
 // Right stick factory calibration at 0x6046: hid-nintendo parses as
 // (center, min_below, max_above) — different order from left stick.
 void fill_right_stick_calibration(uint8_t *data) {
-  write12(data, 0, 2048, 2048); // center
-  write12(data, 3, 2048, 2048); // min_below
-  write12(data, 6, 2047, 2047); // max_above
+  pack_12bit_pair(data + 0, 2048, 2048); // center
+  pack_12bit_pair(data + 3, 2048, 2048); // min_below
+  pack_12bit_pair(data + 6, 2047, 2047); // max_above
 }
 
 void fill_imu_calibration(uint8_t *data) {
@@ -113,8 +99,8 @@ void fill_reply_prefix(SwitchJoypadState &state, uhid::switch_standard_input_pre
   prefix.bat_con = SWITCH_BATTERY_HIGH_BT;
   prefix.vibrator_input = 0;
   std::copy(std::begin(state.buttons), std::end(state.buttons), std::begin(prefix.button_status));
-  pack_stick(prefix.left_stick, state.lx, state.ly);
-  pack_stick(prefix.right_stick, state.rx, state.ry);
+  pack_12bit_pair(prefix.left_stick, state.lx, state.ly);
+  pack_12bit_pair(prefix.right_stick, state.rx, state.ry);
 }
 
 void send_report(SwitchJoypadState &state) {
@@ -125,13 +111,7 @@ void send_report(SwitchJoypadState &state) {
   }
 
   uhid::switch_input_report report{};
-  report.prefix.report_id = uhid::SWITCH_INPUT_REPORT_STANDARD_FULL;
-  report.prefix.timer = state.timer++;
-  report.prefix.bat_con = SWITCH_BATTERY_HIGH_BT;
-  report.prefix.vibrator_input = 0;
-  std::copy(std::begin(state.buttons), std::end(state.buttons), std::begin(report.prefix.button_status));
-  pack_stick(report.prefix.left_stick, state.lx, state.ly);
-  pack_stick(report.prefix.right_stick, state.rx, state.ry);
+  fill_reply_prefix(state, report.prefix, uhid::SWITCH_INPUT_REPORT_STANDARD_FULL);
   std::copy(std::begin(state.imu), std::end(state.imu), std::begin(report.imu));
 
   struct uhid_event ev{};
@@ -296,6 +276,8 @@ void handle_output_report(std::shared_ptr<SwitchJoypadState> state, const uint8_
     break;
   }
 
+  // Subcmd packets also carry rumble data; reset after processing the subcmd
+  // so the rumble effect doesn't persist beyond the command exchange.
   if (state->on_rumble) {
     (*state->on_rumble)(0, 0);
   }
@@ -367,9 +349,9 @@ Result<SwitchJoypad> SwitchJoypad::create(const DeviceDefinition &device) {
   auto joypad = SwitchJoypad(mac);
   joypad._state->vendor_id = device.vendor_id;
   joypad._state->product_id = device.product_id;
-  if (device.product_id == 0x2006) {
+  if (device.product_id == uhid::JOYCON_PID_LEFT) {
     joypad._state->controller_type = uhid::JOYCON_CTLR_TYPE_JCL;
-  } else if (device.product_id == 0x2007) {
+  } else if (device.product_id == uhid::JOYCON_PID_RIGHT) {
     joypad._state->controller_type = uhid::JOYCON_CTLR_TYPE_JCR;
   }
 
@@ -588,7 +570,7 @@ void SwitchJoypad::set_motion(MOTION_TYPE type, float x, float y, float z) {
   //   SDL_X = -kernel_Y,  SDL_Y = kernel_Z,  SDL_Z = -kernel_X
   // Invert:  kernel_X = -SDL_Z,  kernel_Y = -SDL_X,  kernel_Z = SDL_Y
   // Right Joy-Con: hid-nintendo negates Y/Z, so counter-negate.
-  bool is_right_joycon = this->_state->product_id == 0x2007;
+  bool is_right_joycon = this->_state->product_id == uhid::JOYCON_PID_RIGHT;
   float nx = -z;
   float ny = is_right_joycon ? x : -x;
   float nz = is_right_joycon ? -y : y;
@@ -624,6 +606,9 @@ void SwitchJoypad::set_motion(MOTION_TYPE type, float x, float y, float z) {
 
   {
     std::lock_guard<std::mutex> lock(this->_state->mtx);
+    if (!this->_state->imu_enabled) {
+      return;
+    }
     for (auto &sample : this->_state->imu) {
       if (type == ACCELERATION) {
         sample.accel[0] = sx;
@@ -634,14 +619,6 @@ void SwitchJoypad::set_motion(MOTION_TYPE type, float x, float y, float z) {
         sample.gyro[1] = sy;
         sample.gyro[2] = sz;
       }
-    }
-
-    if (type == ACCELERATION && !this->_state->imu_enabled) {
-      return;
-    }
-
-    if (type == GYROSCOPE && !this->_state->imu_enabled) {
-      return;
     }
   }
   send_report(*this->_state);

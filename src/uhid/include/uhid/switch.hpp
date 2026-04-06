@@ -30,21 +30,18 @@ static constexpr uint8_t JOYCON_CTLR_TYPE_JCL = 0x01;
 static constexpr uint8_t JOYCON_CTLR_TYPE_JCR = 0x02;
 static constexpr uint8_t JOYCON_CTLR_TYPE_PRO = 0x03;
 
+static constexpr uint16_t JOYCON_PID_LEFT = 0x2006;
+static constexpr uint16_t JOYCON_PID_RIGHT = 0x2007;
+static constexpr uint16_t JOYCON_PID_PRO = 0x2009;
+
 static constexpr uint32_t JC_CAL_USR_LEFT_MAGIC_ADDR = 0x8010;
 static constexpr uint32_t JC_CAL_USR_RIGHT_MAGIC_ADDR = 0x801B;
-static constexpr uint32_t JC_CAL_USR_LEFT_DATA_ADDR = 0x8012;
-static constexpr uint32_t JC_CAL_USR_RIGHT_DATA_ADDR = 0x801D;
 static constexpr uint32_t JC_CAL_FCT_DATA_LEFT_ADDR = 0x603D;
 static constexpr uint32_t JC_CAL_FCT_DATA_RIGHT_ADDR = 0x6046;
 static constexpr uint32_t JC_IMU_CAL_FCT_DATA_ADDR = 0x6020;
 static constexpr uint32_t JC_IMU_CAL_USR_MAGIC_ADDR = 0x8026;
-static constexpr uint32_t JC_IMU_CAL_USR_DATA_ADDR = 0x8028;
-
-static constexpr uint8_t JC_CAL_USR_MAGIC_0 = 0xB2;
-static constexpr uint8_t JC_CAL_USR_MAGIC_1 = 0xA1;
 
 // 12-bit stick axis range: full range 0..4095, natural center at 2048.
-static constexpr int SWITCH_AXIS_MIN = 0;
 static constexpr int SWITCH_AXIS_MAX = 4095;
 static constexpr int SWITCH_AXIS_CENTER = 2048;
 static constexpr float SWITCH_STANDARD_GRAVITY_CONST = 9.80665f;
