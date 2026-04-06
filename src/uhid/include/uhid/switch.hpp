@@ -26,6 +26,8 @@ static constexpr uint8_t SWITCH_ACK = 0x80;
 static constexpr uint8_t SWITCH_ACK_DEV_INFO = 0x82;
 static constexpr uint8_t SWITCH_ACK_SPI_FLASH_READ = 0x90;
 
+static constexpr uint8_t JOYCON_CTLR_TYPE_JCL = 0x01;
+static constexpr uint8_t JOYCON_CTLR_TYPE_JCR = 0x02;
 static constexpr uint8_t JOYCON_CTLR_TYPE_PRO = 0x03;
 
 static constexpr uint32_t JC_CAL_USR_LEFT_MAGIC_ADDR = 0x8010;

@@ -252,7 +252,7 @@ void handle_output_report(std::shared_ptr<SwitchJoypadState> state, const uint8_
     uint8_t payload[35] = {};
     payload[0] = 0x04;
     payload[1] = 0x33;
-    payload[2] = uhid::JOYCON_CTLR_TYPE_PRO;
+    payload[2] = state->controller_type;
     payload[3] = 0x02;
     std::copy(std::begin(state->mac_raw), std::end(state->mac_raw), &payload[4]);
     send_subcmd_reply(*state, uhid::SWITCH_ACK_DEV_INFO, subcmd_id, payload, sizeof(payload));
@@ -367,6 +367,11 @@ Result<SwitchJoypad> SwitchJoypad::create(const DeviceDefinition &device) {
   auto joypad = SwitchJoypad(mac);
   joypad._state->vendor_id = device.vendor_id;
   joypad._state->product_id = device.product_id;
+  if (device.product_id == 0x2006) {
+    joypad._state->controller_type = uhid::JOYCON_CTLR_TYPE_JCL;
+  } else if (device.product_id == 0x2007) {
+    joypad._state->controller_type = uhid::JOYCON_CTLR_TYPE_JCR;
+  }
 
   auto def = uhid::DeviceDefinition{
       .name = device.name,
@@ -407,6 +412,10 @@ Result<SwitchJoypad> SwitchJoypad::create(const DeviceDefinition &device) {
 
 const std::string &SwitchJoypad::get_mac_address() const {
   return _state->mac;
+}
+
+uint16_t SwitchJoypad::get_product_id() const {
+  return _state->product_id;
 }
 
 std::vector<std::string> SwitchJoypad::get_sys_nodes() const {

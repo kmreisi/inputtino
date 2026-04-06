@@ -370,6 +370,7 @@ public:
   std::vector<std::string> get_nodes() const override;
 
   const std::string &get_mac_address() const;
+  uint16_t get_product_id() const;
 
   std::vector<std::string> get_sys_nodes() const;
 

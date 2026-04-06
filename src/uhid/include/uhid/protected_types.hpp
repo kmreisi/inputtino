@@ -14,13 +14,10 @@ struct SwitchJoypadState {
   unsigned char mac_raw[6] = {};
   uint16_t vendor_id;
   uint16_t product_id;
+  uint8_t controller_type = uhid::JOYCON_CTLR_TYPE_PRO;
 
-  // Protects all mutable controller state below (buttons, sticks, imu, timer).
-  // Must be held by any thread that reads or writes these fields, including
-  // the background repeat-report thread and the API caller threads.
   std::mutex mtx;
 
-  // Named controller state — PS5-style direct fields, packed into wire format in send_report().
   uint8_t buttons[3] = {};
   uint16_t lx = uhid::SWITCH_AXIS_CENTER;
   uint16_t ly = uhid::SWITCH_AXIS_CENTER;
