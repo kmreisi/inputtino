@@ -60,6 +60,12 @@ void fill_right_stick_calibration(uint8_t *data) {
   pack_12bit_pair(data + 6, 2047, 2047); // max_above
 }
 
+// IMU factory calibration layout (24 bytes, matching hid-nintendo's parsing):
+//   bytes  0-5:  accel offset  (3x int16 LE)
+//   bytes  6-11: accel scale   (3x int16 LE)
+//   bytes 12-17: gyro offset   (3x int16 LE)
+//   bytes 18-23: gyro scale    (3x int16 LE)
+// The kernel computes divisor = scale - offset per axis.
 void fill_imu_calibration(uint8_t *data) {
   auto write_le16 = [&](int index, int16_t value) {
     data[index] = static_cast<uint8_t>(value & 0xFF);
@@ -68,8 +74,8 @@ void fill_imu_calibration(uint8_t *data) {
 
   for (int i = 0; i < 3; ++i) {
     write_le16(i * 2, uhid::SWITCH_IMU_ACCEL_OFFSET);
-    write_le16(6 + i * 2, uhid::SWITCH_IMU_GYRO_OFFSET);
-    write_le16(12 + i * 2, uhid::SWITCH_IMU_ACCEL_SCALE_CAL);
+    write_le16(6 + i * 2, uhid::SWITCH_IMU_ACCEL_SCALE_CAL);
+    write_le16(12 + i * 2, uhid::SWITCH_IMU_GYRO_OFFSET);
     write_le16(18 + i * 2, uhid::SWITCH_IMU_GYRO_SCALE_CAL);
   }
 }
