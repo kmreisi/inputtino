@@ -311,13 +311,16 @@ SwitchJoypad::SwitchJoypad(const Mac &mac) : _state(std::make_shared<SwitchJoypa
 }
 
 SwitchJoypad::~SwitchJoypad() {
-  if (this->_state && this->_state->dev) {
-    this->_state->stop_repeat_thread = true;
-    if (this->_send_input_thread.joinable()) {
-      this->_send_input_thread.join();
+  if (this->_state) {
+    if (this->_state->dev) {
+      this->_state->stop_repeat_thread = true;
+      if (this->_send_input_thread.joinable()) {
+        this->_send_input_thread.join();
+      }
+      this->_state->dev->stop_thread();
+      this->_state->dev.reset();
     }
-    this->_state->dev->stop_thread();
-    this->_state->dev.reset();
+    Mac::release(this->_state->mac);
   }
 }
 
