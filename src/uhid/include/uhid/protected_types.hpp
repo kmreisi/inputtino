@@ -10,8 +10,7 @@
 namespace inputtino {
 struct SwitchJoypadState {
   std::shared_ptr<uhid::Device> dev;
-  std::string mac;
-  unsigned char mac_raw[6] = {};
+  std::array<unsigned char, 6> mac = {};
   uint16_t vendor_id;
   uint16_t product_id;
   uint8_t controller_type = uhid::JOYCON_CTLR_TYPE_PRO;
@@ -45,7 +44,7 @@ struct PS5JoypadState {
    * We also use this information internally to unique match a device with the
    * /dev/input/devXX files; see get_nodes()
    */
-  unsigned char mac_address[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+  std::array<unsigned char, 6> mac = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
   uint16_t vendor_id;
 
   uhid::dualsense_input_report current_state = {};

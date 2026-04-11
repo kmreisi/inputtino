@@ -14,13 +14,6 @@ namespace inputtino {
 
 namespace {
 
-std::string uppercase(std::string value) {
-  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-    return static_cast<char>(std::toupper(c));
-  });
-  return value;
-}
-
 // Real Bluetooth Pro Controller 0x30 reports on the host consistently show:
 // - bat_con = 0x60
 // - button_status = 00 80 00 at idle
@@ -150,17 +143,6 @@ void send_subcmd_reply(
   state.dev->send(ev);
 }
 
-std::string generate_mac_string() {
-  auto rand = std::bind(std::uniform_int_distribution<unsigned char>{0, 0xFF},
-                        std::default_random_engine{std::random_device()()});
-  std::ostringstream ss;
-  for (int i = 0; i < 6; ++i) {
-    if (i > 0) ss << ':';
-    ss << std::uppercase << std::hex << std::setfill('0') << std::setw(2)
-       << static_cast<unsigned int>(rand());
-  }
-  return ss.str();
-}
 
 void handle_spi_flash_read(SwitchJoypadState &state, const uint8_t *request_data) {
   uint32_t address = static_cast<uint32_t>(request_data[0]) | (static_cast<uint32_t>(request_data[1]) << 8) |
@@ -240,7 +222,7 @@ void handle_output_report(std::shared_ptr<SwitchJoypadState> state, const uint8_
     payload[1] = 0x33;
     payload[2] = state->controller_type;
     payload[3] = 0x02;
-    std::copy(std::begin(state->mac_raw), std::end(state->mac_raw), &payload[4]);
+    std::copy(state->mac.begin(), state->mac.end(), &payload[4]);
     send_subcmd_reply(*state, uhid::SWITCH_ACK_DEV_INFO, subcmd_id, payload, sizeof(payload));
     break;
   }
@@ -324,19 +306,9 @@ void on_uhid_event(std::shared_ptr<SwitchJoypadState> state, uhid_event ev, int 
 
 } // namespace
 
-SwitchJoypad::SwitchJoypad(std::string mac) : _state(std::make_shared<SwitchJoypadState>()) {
+SwitchJoypad::SwitchJoypad(std::array<unsigned char, 6> mac) : _state(std::make_shared<SwitchJoypadState>()) {
   this->_state->mac = mac;
-  // Parse mac string into mac_raw once; HID payload site uses mac_raw directly.
-  std::stringstream ss(mac);
-  for (int i = 0; i < 6; ++i) {
-    unsigned int v = 0;
-    ss >> std::hex >> v;
-    this->_state->mac_raw[i] = static_cast<unsigned char>(v);
-    if (i < 5) ss.ignore(1, ':');
-  }
-  // buttons[1] bit 7 mirrors a real Pro Controller's steady-state report.
   this->_state->buttons[1] = SWITCH_BUTTON_STATUS1_BASE;
-  // lx/ly/rx/ry default-initialise to SWITCH_AXIS_CENTER via the struct definition.
 }
 
 SwitchJoypad::~SwitchJoypad() {
@@ -351,8 +323,10 @@ SwitchJoypad::~SwitchJoypad() {
 }
 
 Result<SwitchJoypad> SwitchJoypad::create(const DeviceDefinition &device) {
-  std::string mac = device.device_uniq.empty() ? generate_mac_string() : device.device_uniq;
-  auto joypad = SwitchJoypad(mac);
+  auto mac_bytes = device.device_uniq.empty()
+      ? uhid::generate_mac_address()
+      : uhid::mac_from_string(device.device_uniq);
+  auto joypad = SwitchJoypad(mac_bytes);
   joypad._state->vendor_id = device.vendor_id;
   joypad._state->product_id = device.product_id;
   if (device.product_id == uhid::JOYCON_PID_LEFT) {
@@ -364,7 +338,7 @@ Result<SwitchJoypad> SwitchJoypad::create(const DeviceDefinition &device) {
   auto def = uhid::DeviceDefinition{
       .name = device.name,
       .phys = device.device_phys.empty() ? "bluetooth" : device.device_phys,
-      .uniq = mac,
+      .uniq = uhid::mac_to_string(joypad._state->mac),
       .bus = BUS_BLUETOOTH,
       .vendor = static_cast<uint32_t>(device.vendor_id),
       .product = static_cast<uint32_t>(device.product_id),
@@ -379,6 +353,9 @@ Result<SwitchJoypad> SwitchJoypad::create(const DeviceDefinition &device) {
   }
 
   joypad._state->dev = std::make_shared<uhid::Device>(std::move(*dev));
+  // A real Pro Controller sends 0x30 reports at ~66Hz (~15ms interval).
+  // Mirror that cadence so hid-nintendo's "dropped IMU reports" detection
+  // doesn't flag a gap.
   joypad._send_input_thread = std::thread([state = joypad._state]() {
     while (!state->stop_repeat_thread) {
       send_report(*state);
@@ -398,8 +375,8 @@ Result<SwitchJoypad> SwitchJoypad::create(const DeviceDefinition &device) {
   return joypad;
 }
 
-const std::string &SwitchJoypad::get_mac_address() const {
-  return _state->mac;
+std::string SwitchJoypad::get_mac_address() const {
+  return uhid::mac_to_string(_state->mac);
 }
 
 uint16_t SwitchJoypad::get_product_id() const {
@@ -407,54 +384,8 @@ uint16_t SwitchJoypad::get_product_id() const {
 }
 
 std::vector<std::string> SwitchJoypad::get_sys_nodes() const {
-  const std::string base_path = "/sys/devices/virtual/misc/uhid";
-  // Normalize both sides to uppercase so discovery works regardless of whether
-  // the caller supplied upper- or lowercase in device_uniq.
-  const auto mac = uppercase(_state->mac);
-  std::ostringstream target_id;
-  target_id << std::uppercase << std::hex << std::setfill('0') << std::setw(4)
-            << static_cast<unsigned int>(_state->vendor_id);
+  return uhid::find_uhid_sys_nodes(_state->vendor_id, _state->mac);
 
-  std::vector<std::string> nodes;
-  if (!std::filesystem::exists(base_path)) {
-    return nodes;
-  }
-
-  for (const auto &uhid_entry : std::filesystem::directory_iterator{base_path}) {
-    if (!uhid_entry.is_directory()) {
-      continue;
-    }
-
-    auto candidate = uhid_entry.path().filename().string();
-    if (candidate.find(target_id.str()) == std::string::npos) {
-      continue;
-    }
-
-    auto input_path = uhid_entry.path() / "input";
-    if (!std::filesystem::exists(input_path)) {
-      continue;
-    }
-
-    for (const auto &dev_entry : std::filesystem::directory_iterator{input_path}) {
-      if (!dev_entry.is_directory()) {
-        continue;
-      }
-
-      auto uniq_path = dev_entry.path() / "uniq";
-      if (!std::filesystem::exists(uniq_path)) {
-        continue;
-      }
-
-      std::ifstream uniq_file{uniq_path};
-      std::string uniq_value;
-      std::getline(uniq_file, uniq_value);
-      if (uppercase(uniq_value) == mac) {
-        nodes.push_back(dev_entry.path().string());
-      }
-    }
-  }
-
-  return nodes;
 }
 
 std::vector<std::string> SwitchJoypad::get_nodes() const {
@@ -495,17 +426,14 @@ void SwitchJoypad::set_pressed_buttons(unsigned int pressed) {
     buttons[1] = SWITCH_BUTTON_STATUS1_BASE;
     buttons[2] = 0;
 
-    // Map by position (matching PS5Joypad's pattern), not by label.
-    // Xbox A (bottom) → Switch B (bottom), Xbox B (right) → Switch A (right),
-    // Xbox X (left) → Switch Y (left),    Xbox Y (top) → Switch X (top).
-    if (X & pressed)
-      buttons[0] |= 0x01; // Switch Y
     if (Y & pressed)
-      buttons[0] |= 0x02; // Switch X
-    if (A & pressed)
-      buttons[0] |= 0x04; // Switch B
+      buttons[0] |= 0x01;
+    if (X & pressed)
+      buttons[0] |= 0x02;
     if (B & pressed)
-      buttons[0] |= 0x08; // Switch A
+      buttons[0] |= 0x04;
+    if (A & pressed)
+      buttons[0] |= 0x08;
     if (RIGHT_BUTTON & pressed)
       buttons[0] |= 0x40;
 
@@ -572,7 +500,8 @@ void SwitchJoypad::set_stick(Joypad::STICK_POSITION stick_type, short x, short y
 
 void SwitchJoypad::set_motion(MOTION_TYPE type, float x, float y, float z) {
   // Remap from SDL coordinate frame to hid-nintendo's native frame.
-  // SDL applies a Nintendo-specific transform when reading:
+  // SDL applies a Nintendo-specific transform when reading (CorrectSensorData):
+  //   https://github.com/libsdl-org/SDL/blob/main/src/joystick/SDL_joystick.c
   //   SDL_X = -kernel_Y,  SDL_Y = kernel_Z,  SDL_Z = -kernel_X
   // Invert:  kernel_X = -SDL_Z,  kernel_Y = -SDL_X,  kernel_Z = SDL_Y
   // Right Joy-Con: hid-nintendo negates Y/Z, so counter-negate.
