@@ -4,8 +4,8 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
-#include <mutex>
 #include <inputtino/input.hpp>
+#include <mutex>
 #include <uhid/protected_types.hpp>
 #include <uhid/switch.hpp>
 #include <uhid/uhid.hpp>
@@ -87,8 +87,8 @@ int decode_rumble_low_amplitude(uint16_t encoded) {
 
 std::pair<int, int> decode_rumble_block(const uhid::switch_rumble_data &rumble) {
   auto high_amplitude = decode_rumble_high_amplitude(rumble.amp_high);
-  auto low_amplitude = decode_rumble_low_amplitude(
-      static_cast<uint16_t>((rumble.freq_low & 0x80) << 8) | rumble.amp_low);
+  auto low_amplitude =
+      decode_rumble_low_amplitude(static_cast<uint16_t>((rumble.freq_low & 0x80) << 8) | rumble.amp_low);
   return {low_amplitude, high_amplitude};
 }
 
@@ -113,7 +113,7 @@ void send_report(SwitchJoypadState &state) {
   fill_reply_prefix(state, report.prefix, uhid::SWITCH_INPUT_REPORT_STANDARD_FULL);
   std::copy(std::begin(state.imu), std::end(state.imu), std::begin(report.imu));
 
-  struct uhid_event ev{};
+  struct uhid_event ev {};
   ev.type = UHID_INPUT2;
   std::copy(reinterpret_cast<unsigned char *>(&report),
             reinterpret_cast<unsigned char *>(&report) + sizeof(report),
@@ -142,7 +142,6 @@ void send_subcmd_reply(
   ev.u.input2.size = sizeof(report);
   state.dev->send(ev);
 }
-
 
 void handle_spi_flash_read(SwitchJoypadState &state, const uint8_t *request_data) {
   uint32_t address = static_cast<uint32_t>(request_data[0]) | (static_cast<uint32_t>(request_data[1]) << 8) |
@@ -222,26 +221,26 @@ void handle_output_report(std::shared_ptr<SwitchJoypadState> state, const uint8_
     payload[1] = 0x33;
     payload[2] = state->controller_type;
     payload[3] = 0x02;
-    std::copy(state->mac.begin(), state->mac.end(), &payload[4]);
+    std::copy(state->mac.bytes.begin(), state->mac.bytes.end(), &payload[4]);
     send_subcmd_reply(*state, uhid::SWITCH_ACK_DEV_INFO, subcmd_id, payload, sizeof(payload));
     break;
   }
   case uhid::SWITCH_SUBCMD_SET_INPUT_REPORT_MODE: {
     std::lock_guard<std::mutex> lock(state->mtx);
     state->report_mode = subcmd_data[0];
-    }
+  }
     send_subcmd_reply(*state, uhid::SWITCH_ACK, subcmd_id, nullptr, 0);
     break;
   case uhid::SWITCH_SUBCMD_ENABLE_IMU: {
     std::lock_guard<std::mutex> lock(state->mtx);
     state->imu_enabled = subcmd_data[0] != 0;
-    }
+  }
     send_subcmd_reply(*state, uhid::SWITCH_ACK, subcmd_id, nullptr, 0);
     break;
   case uhid::SWITCH_SUBCMD_ENABLE_VIBRATION: {
     std::lock_guard<std::mutex> lock(state->mtx);
     state->vibration_enabled = subcmd_data[0] != 0;
-    }
+  }
     send_subcmd_reply(*state, uhid::SWITCH_ACK, subcmd_id, nullptr, 0);
     break;
   case uhid::SWITCH_SUBCMD_SPI_FLASH_READ:
@@ -306,7 +305,7 @@ void on_uhid_event(std::shared_ptr<SwitchJoypadState> state, uhid_event ev, int 
 
 } // namespace
 
-SwitchJoypad::SwitchJoypad(std::array<unsigned char, 6> mac) : _state(std::make_shared<SwitchJoypadState>()) {
+SwitchJoypad::SwitchJoypad(const Mac &mac) : _state(std::make_shared<SwitchJoypadState>()) {
   this->_state->mac = mac;
   this->_state->buttons[1] = SWITCH_BUTTON_STATUS1_BASE;
 }
@@ -323,10 +322,8 @@ SwitchJoypad::~SwitchJoypad() {
 }
 
 Result<SwitchJoypad> SwitchJoypad::create(const DeviceDefinition &device) {
-  auto mac_bytes = device.device_uniq.empty()
-      ? uhid::generate_mac_address()
-      : uhid::mac_from_string(device.device_uniq);
-  auto joypad = SwitchJoypad(mac_bytes);
+  auto mac = device.device_uniq.empty() ? Mac::generate() : Mac::parse(device.device_uniq);
+  auto joypad = SwitchJoypad(mac);
   joypad._state->vendor_id = device.vendor_id;
   joypad._state->product_id = device.product_id;
   if (device.product_id == uhid::JOYCON_PID_LEFT) {
@@ -338,7 +335,7 @@ Result<SwitchJoypad> SwitchJoypad::create(const DeviceDefinition &device) {
   auto def = uhid::DeviceDefinition{
       .name = device.name,
       .phys = device.device_phys.empty() ? "bluetooth" : device.device_phys,
-      .uniq = uhid::mac_to_string(joypad._state->mac),
+      .uniq = joypad._state->mac.to_string(),
       .bus = BUS_BLUETOOTH,
       .vendor = static_cast<uint32_t>(device.vendor_id),
       .product = static_cast<uint32_t>(device.product_id),
@@ -376,7 +373,7 @@ Result<SwitchJoypad> SwitchJoypad::create(const DeviceDefinition &device) {
 }
 
 std::string SwitchJoypad::get_mac_address() const {
-  return uhid::mac_to_string(_state->mac);
+  return _state->mac.to_string();
 }
 
 uint16_t SwitchJoypad::get_product_id() const {
@@ -385,7 +382,6 @@ uint16_t SwitchJoypad::get_product_id() const {
 
 std::vector<std::string> SwitchJoypad::get_sys_nodes() const {
   return uhid::find_uhid_sys_nodes(_state->vendor_id, _state->mac);
-
 }
 
 std::vector<std::string> SwitchJoypad::get_nodes() const {

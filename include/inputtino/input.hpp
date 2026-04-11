@@ -1,13 +1,12 @@
 #pragma once
 
-#include <array>
 #include <cstdint>
 #include <functional>
+#include <inputtino/mac.hpp>
 #include <inputtino/result.hpp>
 #include <map>
 #include <memory>
 #include <optional>
-#include <random>
 #include <string>
 #include <thread>
 #include <vector>
@@ -392,7 +391,7 @@ protected:
 private:
   std::thread _send_input_thread;
 
-  SwitchJoypad(std::array<unsigned char, 6> mac);
+  SwitchJoypad(const Mac &mac);
 };
 
 class PS5Joypad : public Joypad {
@@ -476,6 +475,6 @@ protected:
 private:
   std::thread _send_input_thread;
 
-  PS5Joypad(uint16_t vendor_id, std::array<unsigned char, 6> mac);
+  PS5Joypad(uint16_t vendor_id, const Mac &mac);
 };
 } // namespace inputtino
