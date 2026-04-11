@@ -385,33 +385,7 @@ std::vector<std::string> SwitchJoypad::get_sys_nodes() const {
 }
 
 std::vector<std::string> SwitchJoypad::get_nodes() const {
-  std::vector<std::string> nodes;
-  auto sys_nodes = get_sys_nodes();
-  if (sys_nodes.empty() || !std::filesystem::exists("/sys/class/input")) {
-    return nodes;
-  }
-
-  std::vector<std::filesystem::path> canonical_sys_nodes;
-  canonical_sys_nodes.reserve(sys_nodes.size());
-  for (const auto &sys_node : sys_nodes) {
-    canonical_sys_nodes.push_back(std::filesystem::weakly_canonical(sys_node));
-  }
-
-  for (const auto &entry : std::filesystem::directory_iterator{"/sys/class/input"}) {
-    const auto name = entry.path().filename().string();
-    if (!(name.rfind("event", 0) == 0 || name.rfind("js", 0) == 0)) {
-      continue;
-    }
-
-    auto device_path = std::filesystem::weakly_canonical(entry.path() / "device");
-    for (const auto &sys_node : canonical_sys_nodes) {
-      if (device_path == sys_node) {
-        nodes.push_back((std::filesystem::path("/dev/input") / name).string());
-        break;
-      }
-    }
-  }
-  return nodes;
+  return uhid::sys_nodes_to_dev_paths(get_sys_nodes());
 }
 
 void SwitchJoypad::set_pressed_buttons(unsigned int pressed) {
