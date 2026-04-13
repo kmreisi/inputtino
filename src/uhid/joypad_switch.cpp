@@ -399,14 +399,20 @@ void SwitchJoypad::set_pressed_buttons(unsigned int pressed) {
     buttons[1] = SWITCH_BUTTON_STATUS1_BASE;
     buttons[2] = 0;
 
-    if (Y & pressed)
-      buttons[0] |= 0x01;
+    // Positional remap so the Joypad API (Xbox naming) stays consistent
+    // across backends. Physically, Switch Y is where Xbox X sits (left),
+    // Switch X is where Xbox Y sits (top), Switch B is bottom, Switch A is
+    // right — so Xbox A→SwitchB, Xbox B→SwitchA, Xbox X→SwitchY,
+    // Xbox Y→SwitchX. SDL's gamepad DB then round-trips to the right
+    // SDL_CONTROLLER_BUTTON_*.
     if (X & pressed)
-      buttons[0] |= 0x02;
-    if (B & pressed)
-      buttons[0] |= 0x04;
+      buttons[0] |= 0x01; // Switch Y slot (west / left)
+    if (Y & pressed)
+      buttons[0] |= 0x02; // Switch X slot (north / top)
     if (A & pressed)
-      buttons[0] |= 0x08;
+      buttons[0] |= 0x04; // Switch B slot (south / bottom)
+    if (B & pressed)
+      buttons[0] |= 0x08; // Switch A slot (east / right)
     if (RIGHT_BUTTON & pressed)
       buttons[0] |= 0x40;
 

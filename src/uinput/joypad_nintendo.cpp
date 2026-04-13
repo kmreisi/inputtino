@@ -144,14 +144,16 @@ void SwitchJoypad::set_pressed_buttons(unsigned int newly_pressed) {
         // Capture button
         libevdev_uinput_write_event(controller, EV_KEY, BTN_Z, bf_new & MISC_FLAG ? 1 : 0);
       }
+      // Positional remap to keep the Joypad API (Xbox naming) consistent
+      // across backends. See also src/uhid/joypad_switch.cpp.
       if (A & bf_changed)
-        libevdev_uinput_write_event(controller, EV_KEY, BTN_EAST, bf_new & A ? 1 : 0);
+        libevdev_uinput_write_event(controller, EV_KEY, BTN_SOUTH, bf_new & A ? 1 : 0);
       if (B & bf_changed)
-        libevdev_uinput_write_event(controller, EV_KEY, BTN_SOUTH, bf_new & B ? 1 : 0);
+        libevdev_uinput_write_event(controller, EV_KEY, BTN_EAST, bf_new & B ? 1 : 0);
       if (X & bf_changed)
-        libevdev_uinput_write_event(controller, EV_KEY, BTN_NORTH, bf_new & X ? 1 : 0);
+        libevdev_uinput_write_event(controller, EV_KEY, BTN_WEST, bf_new & X ? 1 : 0);
       if (Y & bf_changed)
-        libevdev_uinput_write_event(controller, EV_KEY, BTN_WEST, bf_new & Y ? 1 : 0);
+        libevdev_uinput_write_event(controller, EV_KEY, BTN_NORTH, bf_new & Y ? 1 : 0);
     }
 
     libevdev_uinput_write_event(controller, EV_SYN, SYN_REPORT, 0);

@@ -71,7 +71,7 @@ public:
   flush_sdl_events();                                                                                                  \
   REQUIRE(SDL_GameControllerGetButton(gc, SDL_BTN) == 1);
 
-static void test_buttons(SDL_GameController *gc, Joypad &joypad) {
+static void test_buttons(SDL_GameController *gc, Joypad &joypad, bool nintendo_layout = false) {
   SDL_TEST_BUTTON(Joypad::DPAD_UP, SDL_CONTROLLER_BUTTON_DPAD_UP)
   SDL_TEST_BUTTON(Joypad::DPAD_DOWN, SDL_CONTROLLER_BUTTON_DPAD_DOWN)
   SDL_TEST_BUTTON(Joypad::DPAD_LEFT, SDL_CONTROLLER_BUTTON_DPAD_LEFT)
@@ -82,10 +82,23 @@ static void test_buttons(SDL_GameController *gc, Joypad &joypad) {
   SDL_TEST_BUTTON(Joypad::LEFT_BUTTON, SDL_CONTROLLER_BUTTON_LEFTSHOULDER)
   SDL_TEST_BUTTON(Joypad::RIGHT_BUTTON, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)
 
-  SDL_TEST_BUTTON(Joypad::A, SDL_CONTROLLER_BUTTON_A)
-  SDL_TEST_BUTTON(Joypad::B, SDL_CONTROLLER_BUTTON_B)
-  SDL_TEST_BUTTON(Joypad::X, SDL_CONTROLLER_BUTTON_X)
-  SDL_TEST_BUTTON(Joypad::Y, SDL_CONTROLLER_BUTTON_Y)
+  // Face buttons: the Joypad enum uses Xbox naming (A=south, B=east,
+  // X=west, Y=north) and inputtino remaps positionally when driving
+  // Nintendo-labeled hardware. SDL2 on Switch Pro, however, keeps the
+  // Nintendo face-button labels in SDL_CONTROLLER_BUTTON_* (fixed in
+  // SDL3 via SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS), so a physically
+  // correct south-button press arrives as SDL's B, east as A, etc.
+  if (nintendo_layout) {
+    SDL_TEST_BUTTON(Joypad::A, SDL_CONTROLLER_BUTTON_B)
+    SDL_TEST_BUTTON(Joypad::B, SDL_CONTROLLER_BUTTON_A)
+    SDL_TEST_BUTTON(Joypad::X, SDL_CONTROLLER_BUTTON_Y)
+    SDL_TEST_BUTTON(Joypad::Y, SDL_CONTROLLER_BUTTON_X)
+  } else {
+    SDL_TEST_BUTTON(Joypad::A, SDL_CONTROLLER_BUTTON_A)
+    SDL_TEST_BUTTON(Joypad::B, SDL_CONTROLLER_BUTTON_B)
+    SDL_TEST_BUTTON(Joypad::X, SDL_CONTROLLER_BUTTON_X)
+    SDL_TEST_BUTTON(Joypad::Y, SDL_CONTROLLER_BUTTON_Y)
+  }
 
   SDL_TEST_BUTTON(Joypad::START, SDL_CONTROLLER_BUTTON_START)
   SDL_TEST_BUTTON(Joypad::BACK, SDL_CONTROLLER_BUTTON_BACK)
@@ -205,7 +218,7 @@ TEST_CASE_METHOD(SDLTestsFixture, "Nintendo Joypad", "[SDL]") {
   REQUIRE(gc);
   REQUIRE(SDL_GameControllerGetType(gc) == SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_PRO);
 
-  test_buttons(gc, joypad);
+  test_buttons(gc, joypad, /*nintendo_layout=*/true);
   { // Rumble
     // Checking for basic capability
     REQUIRE(SDL_GameControllerHasRumble(gc));
