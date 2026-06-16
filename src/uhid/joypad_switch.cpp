@@ -353,6 +353,9 @@ Result<SwitchJoypad> SwitchJoypad::create(const DeviceDefinition &device) {
   }
 
   joypad._state->dev = std::make_shared<uhid::Device>(std::move(*dev));
+  // Stash the (fully resolved) definition so the device can be re-created in place later — same MAC/uniq, so
+  // get_sys_nodes() still matches and lobby hand-off keeps its /dev/input/* layout.
+  joypad._state->def = def;
   // A real Pro Controller sends 0x30 reports at ~66Hz (~15ms interval).
   // Mirror that cadence so hid-nintendo's "dropped IMU reports" detection
   // doesn't flag a gap.
@@ -373,6 +376,39 @@ Result<SwitchJoypad> SwitchJoypad::create(const DeviceDefinition &device) {
   }
 
   return joypad;
+}
+
+void SwitchJoypad::recreate_device() {
+  if (!_state || !_state->dev) {
+    return;
+  }
+
+  // Mirror PS5Joypad::recreate_device(): stop the report pump, tear the device down so any stale fd in the
+  // previous container is invalidated (UHID_DESTROY), then rebuild with the same definition so node matching
+  // stays stable. on_rumble / controller_type / current button & stick state all live in _state and survive.
+  _state->stop_repeat_thread = true;
+  if (_send_input_thread.joinable()) {
+    _send_input_thread.join();
+  }
+
+  _state->dev->stop_thread();
+  _state->dev.reset();
+
+  auto dev =
+      uhid::Device::create(_state->def, [state = _state](uhid_event ev, int fd) { on_uhid_event(state, ev, fd); });
+  if (!dev) {
+    fprintf(stderr, "Unable to recreate Switch joypad device: %s\n", dev.getErrorMessage().c_str());
+    return;
+  }
+  _state->dev = std::make_shared<uhid::Device>(std::move(*dev));
+
+  _state->stop_repeat_thread = false;
+  _send_input_thread = std::thread([state = _state]() {
+    while (!state->stop_repeat_thread) {
+      send_report(*state);
+      std::this_thread::sleep_for(std::chrono::milliseconds(15));
+    }
+  });
 }
 
 std::string SwitchJoypad::get_mac_address() const {

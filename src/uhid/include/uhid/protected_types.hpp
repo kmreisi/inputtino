@@ -10,6 +10,13 @@
 namespace inputtino {
 struct SwitchJoypadState {
   std::shared_ptr<uhid::Device> dev;
+
+  /**
+   * The uhid definition used to create dev. Kept so recreate_device() can tear the device down and build an
+   * identical one (same MAC/uniq, so get_sys_nodes() still matches) without losing the joypad's other state.
+   */
+  uhid::DeviceDefinition def = {};
+
   Mac mac;
   uint16_t vendor_id;
   uint16_t product_id;
@@ -34,6 +41,16 @@ struct SwitchJoypadState {
 
 struct PS5JoypadState {
   std::shared_ptr<uhid::Device> dev;
+
+  /**
+   * The uhid definition used to create dev. Kept so recreate_device() can tear the device down and build an
+   * identical one (same MAC/uniq, so get_sys_nodes() still matches) without losing the joypad's other state.
+   */
+  uhid::DeviceDefinition def = {};
+
+  // MAC allocated from the pooled Mac type (switch-pro-controller work);
+  // supersedes the legacy mac_address[6] array. dev_paths derive from
+  // this so recreate_device() rebuilds with the same /dev/input/* layout.
   Mac mac;
   uint16_t vendor_id;
 
