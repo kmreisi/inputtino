@@ -7,6 +7,8 @@
 #include <fstream>
 #include <inputtino/input.hpp>
 #include <iomanip>
+#include <iostream>
+#include <udev_helpers.hpp>
 #include <random>
 #include <uhid/protected_types.hpp>
 #include <uhid/ps5.hpp>
@@ -478,9 +480,13 @@ void PS5Joypad::set_motion(PS5Joypad::MOTION_TYPE type, float x, float y, float 
     break;
   }
   case GYROSCOPE: {
-    this->_state->current_state.gyro[0] = to_le_signed(x, x * uhid::gyro_resolution);
-    this->_state->current_state.gyro[1] = to_le_signed(y, y * uhid::gyro_resolution);
-    this->_state->current_state.gyro[2] = to_le_signed(z, z * uhid::gyro_resolution);
+    // Callers pass gyro in deg/s (the SDL / Moonlight convention); the DualSense
+    // HID report is calibrated in rad/s, so the deg->rad conversion lives here
+    // rather than in every caller.
+    constexpr float DEG_TO_RAD = static_cast<float>(M_PI) / 180.0f;
+    this->_state->current_state.gyro[0] = to_le_signed(x, x * DEG_TO_RAD * uhid::gyro_resolution);
+    this->_state->current_state.gyro[1] = to_le_signed(y, y * DEG_TO_RAD * uhid::gyro_resolution);
+    this->_state->current_state.gyro[2] = to_le_signed(z, z * DEG_TO_RAD * uhid::gyro_resolution);
 
     send_report(*this->_state);
     break;
@@ -533,6 +539,117 @@ void PS5Joypad::release_finger(int finger_nr) {
     this->_state->current_state.points[finger_nr].contact = 1;
     send_report(*this->_state);
   }
+}
+
+std::vector<Joypad::UdevEvent> PS5Joypad::get_udev_events() const {
+  std::vector<Joypad::UdevEvent> events;
+
+  auto sys_nodes = this->get_sys_nodes();
+  for (const auto &sys_entry : sys_nodes) {
+    for (const auto &sys_node : std::filesystem::directory_iterator{sys_entry}) {
+      auto fname = sys_node.path().filename().string();
+      if (sys_node.is_directory() &&
+          (fname.rfind("event", 0) == 0 || fname.rfind("mouse", 0) == 0 || fname.rfind("js", 0) == 0)) {
+        auto sys_path = sys_node.path().string();
+        sys_path.erase(0, 4); // strip leading /sys
+        auto dev_path = ("/dev/input/" / sys_node.path().filename()).string();
+        auto event = gen_udev_base_event(dev_path, sys_path);
+
+        // The device name tells us whether this node is the touchpad, the motion
+        // sensor or the pad itself.
+        std::ifstream name_file(std::filesystem::path(sys_entry) / "name");
+        std::string name;
+        std::getline(name_file, name);
+        if (name.find("Touchpad") != std::string::npos) {
+          event["ID_INPUT_TOUCHPAD"] = "1";
+          event[".INPUT_CLASS"] = "mouse";
+          event["ID_INPUT_TOUCHPAD_INTEGRATION"] = "internal";
+        } else if (name.find("Motion") != std::string::npos) {
+          event["ID_INPUT_ACCELEROMETER"] = "1";
+          event["ID_INPUT_WIDTH_MM"] = "8";
+          event["ID_INPUT_HEIGHT_MM"] = "8";
+          event["IIO_SENSOR_PROXY_TYPE"] = "input-accel";
+          event["SYSTEMD_WANTS"] = "iio-sensor-proxy.service";
+          event["UNIQ"] = this->get_mac_address();
+        } else {
+          event["ID_INPUT_JOYSTICK"] = "1";
+          event[".INPUT_CLASS"] = "joystick";
+          event["UNIQ"] = this->get_mac_address();
+        }
+        events.emplace_back(event);
+      }
+    }
+  }
+
+  if (!sys_nodes.empty()) {
+    // Add the /dev/hidraw* node (used by Steam to access LED status etc.).
+    auto base_path = std::filesystem::path(sys_nodes[0]).parent_path().parent_path();
+    if (std::filesystem::exists(base_path / "hidraw")) {
+      for (const auto &hidraw_entry : std::filesystem::directory_iterator{base_path / "hidraw"}) {
+        auto dev_path = "/dev/" + hidraw_entry.path().filename().string();
+        auto sys_path = hidraw_entry.path().string();
+        sys_path.erase(0, 4); // strip leading /sys
+        auto event = gen_udev_base_event(dev_path, sys_path);
+        event["SUBSYSTEM"] = "hidraw";
+        events.emplace_back(event);
+      }
+    } else {
+      std::cerr << "inputtino: unable to find HIDRAW nodes for PS5 joypad under " << base_path.string() << std::endl;
+    }
+  }
+
+  return events;
+}
+
+std::vector<Joypad::UdevHwDbEntry> PS5Joypad::get_udev_hw_db_entries() const {
+  std::vector<Joypad::UdevHwDbEntry> result;
+
+  for (const auto &sys_entry : this->get_sys_nodes()) {
+    for (const auto &sys_node : std::filesystem::directory_iterator{sys_entry}) {
+      auto fname = sys_node.path().filename().string();
+      if (sys_node.is_directory() &&
+          (fname.rfind("event", 0) == 0 || fname.rfind("js", 0) == 0 || fname.rfind("mouse", 0) == 0)) {
+        auto dev_path = ("/dev/input/" / sys_node.path().filename()).string();
+        Joypad::UdevHwDbEntry entry;
+        entry.first = gen_udev_hw_db_filename(dev_path);
+
+        std::ifstream name_file(std::filesystem::path(sys_entry) / "name");
+        std::string name;
+        std::getline(name_file, name);
+        if (name.find("Touchpad") != std::string::npos) {
+          entry.second = {"E:ID_INPUT=1",
+                          "E:ID_INPUT_TOUCHPAD=1",
+                          "E:ID_BUS=usb",
+                          "G:seat",
+                          "G:uaccess",
+                          "Q:seat",
+                          "Q:uaccess",
+                          "V:1"};
+        } else if (name.find("Motion") != std::string::npos) {
+          entry.second = {"E:ID_INPUT=1",
+                          "E:ID_INPUT_ACCELEROMETER=1",
+                          "E:ID_BUS=usb",
+                          "G:seat",
+                          "G:uaccess",
+                          "Q:seat",
+                          "Q:uaccess",
+                          "V:1"};
+        } else {
+          entry.second = {"E:ID_INPUT=1",
+                          "E:ID_INPUT_JOYSTICK=1",
+                          "E:ID_BUS=usb",
+                          "G:seat",
+                          "G:uaccess",
+                          "Q:seat",
+                          "Q:uaccess",
+                          "V:1"};
+        }
+        result.emplace_back(entry);
+      }
+    }
+  }
+
+  return result;
 }
 
 } // namespace inputtino

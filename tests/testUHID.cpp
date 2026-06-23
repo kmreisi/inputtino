@@ -339,10 +339,16 @@ TEST_CASE_METHOD(SDLTestsFixture, "PS Joypad", "[SDL],[PS]") {
       WARN(SDL_GetError());
     }
 
+    // set_motion() now takes gyro in deg/s (the SDL / Moonlight convention) while
+    // SDL reports gyro in rad/s. We keep the expected rad/s values in gyro_data and
+    // feed the degree equivalent, so the round-trip lands back on the same values.
+    auto rad2deg = [](float r) { return r * 180.0f / static_cast<float>(M_PI); };
+
     std::array<float, 3> gyro_data = {0.0f,
                                       M_PI_2f, // half a turn (180 degrees)
                                       M_PIf};  // full turn (360 degrees)
-    joypad.set_motion(inputtino::PS5Joypad::GYROSCOPE, gyro_data[0], gyro_data[1], gyro_data[2]);
+    joypad.set_motion(
+        inputtino::PS5Joypad::GYROSCOPE, rad2deg(gyro_data[0]), rad2deg(gyro_data[1]), rad2deg(gyro_data[2]));
     std::this_thread::sleep_for(10ms);
 
     SDL_GameControllerUpdate();
@@ -366,7 +372,8 @@ TEST_CASE_METHOD(SDLTestsFixture, "PS Joypad", "[SDL],[PS]") {
         -M_PI_2f, // half a turn (180 degrees)
         -M_PIf    // full turn (360 degrees)
     };
-    joypad.set_motion(inputtino::PS5Joypad::GYROSCOPE, gyro_data[0], gyro_data[1], gyro_data[2]);
+    joypad.set_motion(
+        inputtino::PS5Joypad::GYROSCOPE, rad2deg(gyro_data[0]), rad2deg(gyro_data[1]), rad2deg(gyro_data[2]));
     std::this_thread::sleep_for(10ms);
 
     SDL_GameControllerUpdate();
@@ -385,7 +392,8 @@ TEST_CASE_METHOD(SDLTestsFixture, "PS Joypad", "[SDL],[PS]") {
 
     // Try out problematic values from https://github.com/LizardByte/Sunshine/issues/3247
     gyro_data = {-32769.0f, 32769.0f, -0.0004124999977648258f};
-    joypad.set_motion(inputtino::PS5Joypad::GYROSCOPE, gyro_data[0], gyro_data[1], gyro_data[2]);
+    joypad.set_motion(
+        inputtino::PS5Joypad::GYROSCOPE, rad2deg(gyro_data[0]), rad2deg(gyro_data[1]), rad2deg(gyro_data[2]));
     std::this_thread::sleep_for(10ms);
 
     SDL_GameControllerUpdate();

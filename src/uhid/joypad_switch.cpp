@@ -1,11 +1,13 @@
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <inputtino/input.hpp>
 #include <mutex>
+#include <udev_helpers.hpp>
 #include <uhid/protected_types.hpp>
 #include <uhid/switch.hpp>
 #include <uhid/uhid.hpp>
@@ -576,6 +578,194 @@ void SwitchJoypad::set_motion(MOTION_TYPE type, float x, float y, float z) {
 
 void SwitchJoypad::set_on_rumble(const std::function<void(int low_freq, int high_freq)> &callback) {
   this->_state->on_rumble = callback;
+}
+
+namespace {
+
+constexpr auto SWITCH_VENDOR_ID = "057e";
+constexpr auto SWITCH_PRODUCT_ID = "2009";
+
+std::string uppercase_ascii(std::string value) {
+  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+    return static_cast<char>(std::toupper(ch));
+  });
+  return value;
+}
+
+std::map<std::string, std::string> read_uevent_properties(const std::filesystem::path &uevent_path) {
+  std::map<std::string, std::string> props;
+  std::ifstream uevent_file(uevent_path);
+  std::string line;
+  while (std::getline(uevent_file, line)) {
+    if (auto split = line.find('='); split != std::string::npos) {
+      auto value = line.substr(split + 1);
+      if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
+        value = value.substr(1, value.size() - 2);
+      }
+      props.emplace(line.substr(0, split), value);
+    }
+  }
+  return props;
+}
+
+std::map<std::string, std::string> switch_input_identity(const std::filesystem::path &sys_entry,
+                                                         const std::string &fallback_uniq) {
+  auto props = read_uevent_properties(sys_entry / "uevent");
+  const auto uniq = uppercase_ascii(props.count("UNIQ") ? props.at("UNIQ") : fallback_uniq);
+  return {
+      {"UNIQ", uniq},
+      {"HID_UNIQ", uniq},
+      {"PHYS", props.count("PHYS") ? props.at("PHYS") : "bluetooth"},
+      {"MODALIAS", props.count("MODALIAS") ? props.at("MODALIAS") : "hid:b0005g0001v0000057Ep00002009"},
+  };
+}
+
+std::map<std::string, std::string> switch_hid_identity(const std::filesystem::path &base_path,
+                                                       const std::string &fallback_uniq) {
+  auto props = read_uevent_properties(base_path / "uevent");
+  const auto uniq = uppercase_ascii(props.count("HID_UNIQ") ? props.at("HID_UNIQ") : fallback_uniq);
+  return {
+      {"HID_UNIQ", uniq},
+      {"HID_PHYS", props.count("HID_PHYS") ? props.at("HID_PHYS") : "bluetooth"},
+      {"MODALIAS", props.count("MODALIAS") ? props.at("MODALIAS") : "hid:b0005g0001v0000057Ep00002009"},
+  };
+}
+
+// Stamp the Switch Pro Bluetooth HID identity onto a udev event map.
+void append_switch_identity(std::map<std::string, std::string> &event,
+                            const std::map<std::string, std::string> &identity) {
+  for (const auto &[key, value] : identity) {
+    if (!value.empty()) {
+      event[key] = value;
+    }
+  }
+  event["ID_BUS"] = "bluetooth";
+  event["HID_NAME"] = "Pro Controller";
+  event["HID_ID"] = "0005:0000057E:00002009";
+  event["ID_VENDOR_ID"] = SWITCH_VENDOR_ID;
+  event["ID_MODEL_ID"] = SWITCH_PRODUCT_ID;
+}
+
+// Same identity, as hwdb "E:KEY=VALUE" rows appended to an entry.
+void append_switch_identity(std::vector<std::string> &entry, const std::map<std::string, std::string> &identity) {
+  std::vector<std::string> rows = {
+      "E:ID_BUS=bluetooth",
+      "E:HID_NAME=Pro Controller",
+      "E:HID_ID=0005:0000057E:00002009",
+      "E:ID_VENDOR_ID=057e",
+      "E:ID_MODEL_ID=2009",
+      "E:ID_VENDOR=Nintendo",
+      "E:ID_MODEL=Pro_Controller",
+      "E:ID_SERIAL=Nintendo_Pro_Controller",
+  };
+  for (const auto &[key, value] : identity) {
+    if (!value.empty()) {
+      rows.push_back("E:" + key + "=" + value);
+    }
+  }
+  entry.insert(entry.end(), rows.begin(), rows.end());
+}
+
+} // namespace
+
+std::vector<Joypad::UdevEvent> SwitchJoypad::get_udev_events() const {
+  std::vector<Joypad::UdevEvent> events;
+  const auto uniq = this->get_mac_address();
+
+  auto sys_nodes = this->get_sys_nodes();
+  for (const auto &sys_entry : sys_nodes) {
+    for (const auto &sys_node : std::filesystem::directory_iterator{sys_entry}) {
+      if (!sys_node.is_directory() || sys_node.path().filename().string().rfind("event", 0) != 0) {
+        continue;
+      }
+
+      auto sys_path = sys_node.path().string();
+      sys_path.erase(0, 4); // strip leading /sys
+      auto dev_path = ("/dev/input/" / sys_node.path().filename()).string();
+      auto event = gen_udev_base_event(dev_path, sys_path);
+      auto identity = switch_input_identity(sys_entry, uniq);
+
+      std::ifstream name_file(std::filesystem::path(sys_entry) / "name");
+      std::string name;
+      std::getline(name_file, name);
+
+      if (name.find("Motion") != std::string::npos || name.find("IMU") != std::string::npos) {
+        event["ID_INPUT_ACCELEROMETER"] = "1";
+        event["ID_INPUT_WIDTH_MM"] = "8";
+        event["ID_INPUT_HEIGHT_MM"] = "8";
+        event["IIO_SENSOR_PROXY_TYPE"] = "input-accel";
+        event["SYSTEMD_WANTS"] = "iio-sensor-proxy.service";
+        event["UNIQ"] = uniq;
+      } else {
+        event["ID_INPUT_JOYSTICK"] = "1";
+        event[".INPUT_CLASS"] = "joystick";
+      }
+      append_switch_identity(event, identity);
+      events.emplace_back(event);
+    }
+  }
+
+  if (!sys_nodes.empty()) {
+    auto base_path = std::filesystem::path(sys_nodes[0]).parent_path().parent_path();
+    if (std::filesystem::exists(base_path / "hidraw")) {
+      for (const auto &hidraw_entry : std::filesystem::directory_iterator{base_path / "hidraw"}) {
+        auto dev_path = "/dev/" + hidraw_entry.path().filename().string();
+        auto sys_path = hidraw_entry.path().string();
+        sys_path.erase(0, 4); // strip leading /sys
+        auto event = gen_udev_base_event(dev_path, sys_path);
+        event["SUBSYSTEM"] = "hidraw";
+        append_switch_identity(event, switch_hid_identity(base_path, uniq));
+        events.emplace_back(event);
+      }
+    }
+  }
+
+  return events;
+}
+
+std::vector<Joypad::UdevHwDbEntry> SwitchJoypad::get_udev_hw_db_entries() const {
+  std::vector<Joypad::UdevHwDbEntry> result;
+  const auto uniq = this->get_mac_address();
+
+  for (const auto &sys_entry : this->get_sys_nodes()) {
+    for (const auto &sys_node : std::filesystem::directory_iterator{sys_entry}) {
+      if (!sys_node.is_directory() || sys_node.path().filename().string().rfind("event", 0) != 0) {
+        continue;
+      }
+
+      auto dev_path = ("/dev/input/" / sys_node.path().filename()).string();
+      Joypad::UdevHwDbEntry entry;
+      entry.first = gen_udev_hw_db_filename(dev_path);
+
+      std::ifstream name_file(std::filesystem::path(sys_entry) / "name");
+      std::string name;
+      std::getline(name_file, name);
+      auto identity = switch_input_identity(sys_entry, uniq);
+
+      if (name.find("Motion") != std::string::npos || name.find("IMU") != std::string::npos) {
+        entry.second = {"E:ID_INPUT=1", "E:ID_INPUT_ACCELEROMETER=1", "G:seat", "G:uaccess", "Q:seat", "Q:uaccess", "V:1"};
+      } else {
+        entry.second = {"E:ID_INPUT=1", "E:ID_INPUT_JOYSTICK=1", "G:seat", "G:uaccess", "Q:seat", "Q:uaccess", "V:1"};
+      }
+      append_switch_identity(entry.second, identity);
+      result.emplace_back(entry);
+    }
+  }
+
+  auto sys_nodes = this->get_sys_nodes();
+  if (!sys_nodes.empty()) {
+    auto base_path = std::filesystem::path(sys_nodes[0]).parent_path().parent_path();
+    if (std::filesystem::exists(base_path / "hidraw")) {
+      for (const auto &hidraw_entry : std::filesystem::directory_iterator{base_path / "hidraw"}) {
+        auto dev_path = "/dev/" + hidraw_entry.path().filename().string();
+        std::vector<std::string> rows = {"E:SUBSYSTEM=hidraw", "G:seat", "G:uaccess", "Q:seat", "Q:uaccess", "V:1"};
+        append_switch_identity(rows, switch_hid_identity(base_path, uniq));
+        result.push_back({gen_udev_hw_db_filename(dev_path), rows});
+      }
+    }
+  }
+
+  return result;
 }
 
 } // namespace inputtino
