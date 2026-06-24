@@ -1,28 +1,20 @@
 #pragma once
 #include <functional>
 #include <inputtino/input.hpp>
-#include <mutex>
 #include <optional>
+#include <uhid/joypad_common.hpp>
 #include <uhid/ps5.hpp>
 #include <uhid/switch.hpp>
 #include <uhid/uhid.hpp>
 
 namespace inputtino {
-struct SwitchJoypadState {
-  std::shared_ptr<uhid::Device> dev;
-
-  /**
-   * The uhid definition used to create dev. Kept so recreate_device() can tear the device down and build an
-   * identical one (same MAC/uniq, so get_sys_nodes() still matches) without losing the joypad's other state.
-   */
-  uhid::DeviceDefinition def = {};
-
+// dev / def / mtx / stop_repeat_thread live in uhid_joypad::CommonState, shared
+// with PS5JoypadState below and driven by the helpers in uhid/joypad_common.hpp.
+struct SwitchJoypadState : uhid_joypad::CommonState {
   Mac mac;
   uint16_t vendor_id;
   uint16_t product_id;
   uint8_t controller_type = uhid::JOYCON_CTLR_TYPE_PRO;
-
-  std::mutex mtx;
 
   uint8_t buttons[3] = {};
   uint16_t lx = uhid::SWITCH_AXIS_CENTER;
@@ -36,21 +28,12 @@ struct SwitchJoypadState {
   bool imu_enabled = false;
   bool vibration_enabled = false;
   std::optional<std::function<void(int, int)>> on_rumble = std::nullopt;
-  bool stop_repeat_thread = false;
 };
 
-struct PS5JoypadState {
-  std::shared_ptr<uhid::Device> dev;
-
-  /**
-   * The uhid definition used to create dev. Kept so recreate_device() can tear the device down and build an
-   * identical one (same MAC/uniq, so get_sys_nodes() still matches) without losing the joypad's other state.
-   */
-  uhid::DeviceDefinition def = {};
-
+struct PS5JoypadState : uhid_joypad::CommonState {
   // MAC allocated from the pooled Mac type (switch-pro-controller work);
-  // supersedes the legacy mac_address[6] array. dev_paths derive from
-  // this so recreate_device() rebuilds with the same /dev/input/* layout.
+  // dev_paths derive from this so recreate_device() rebuilds with the same
+  // /dev/input/* layout.
   Mac mac;
   uint16_t vendor_id;
 
@@ -63,7 +46,6 @@ struct PS5JoypadState {
   uint32_t last_left_trigger_event = 0;
   uint32_t last_right_trigger_event = 0;
 
-  bool stop_repeat_thread = false;
   bool is_bluetooth = true;
 };
 } // namespace inputtino

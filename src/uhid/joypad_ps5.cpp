@@ -72,7 +72,13 @@ static void send_report(PS5JoypadState &state) {
               &ev.u.input2.data[end_of_msg]);
   }
 
-  state.dev->send(ev);
+  // Serialise with recreate_device(): it briefly resets state.dev to null while
+  // rebuilding the uhid device, and this can be called concurrently from the
+  // control thread (client motion/buttons) as well as the report-pump thread.
+  std::lock_guard<std::mutex> lock(state.mtx);
+  if (state.dev) {
+    state.dev->send(ev);
+  }
 }
 
 static void on_uhid_event(std::shared_ptr<PS5JoypadState> state, uhid_event ev, int fd) {
@@ -283,53 +289,26 @@ Result<PS5Joypad> PS5Joypad::create(const DeviceDefinition &device) {
     // Readers will expect frequent events event if the state hasn't changed.
     // The thread is kept joinable (see the move constructor) so it can be stopped cleanly before the device it
     // writes to is destroyed, both on teardown and in recreate_device().
-    joypad._send_input_thread = std::thread([state = joypad._state]() {
-      while (!state->stop_repeat_thread) {
-        send_report(*state);
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-      }
-    });
+    joypad._send_input_thread = uhid_joypad::start_report_pump<PS5JoypadState>(
+        joypad._state, [](PS5JoypadState &s) { send_report(s); }, std::chrono::milliseconds(10));
 
+    // Only return once the kernel (hid-playstation) has exposed the device's
+    // input/hidraw nodes in sysfs, so callers reading get_udev_events()/get_nodes()
+    // right away (e.g. plugging the pad into a container) see a bound device.
+    uhid_joypad::wait_for_sys_nodes([&joypad]() { return joypad.get_sys_nodes(); });
     return joypad;
   }
   return Error(dev.getErrorMessage());
 }
 
 void PS5Joypad::recreate_device() {
-  if (!_state || !_state->dev) {
-    return;
-  }
-
-  // Stop the report pump first and wait for it to finish: send_report() writes to _state->dev, so it must not be
-  // running while we tear the device down.
-  _state->stop_repeat_thread = true;
-  if (_send_input_thread.joinable()) {
-    _send_input_thread.join();
-  }
-
-  // Destroy the old device (UHID_DESTROY + close). This invalidates any fd another container still holds open
-  // against the old node, so input can no longer leak there. stop_thread() also joins the device's own event
-  // listener before we drop it.
-  _state->dev->stop_thread();
-  _state->dev.reset();
-
-  // Re-create an identical device (same MAC/uniq via the stashed definition) so node matching stays stable, then
-  // re-arm the report pump. The callbacks (rumble/LED/trigger) and current_state live in _state and are preserved.
-  auto dev =
-      uhid::Device::create(_state->def, [state = _state](uhid_event ev, int fd) { on_uhid_event(state, ev, fd); });
-  if (!dev) {
-    fprintf(stderr, "Unable to recreate PS5 joypad device: %s\n", dev.getErrorMessage().c_str());
-    return;
-  }
-  _state->dev = std::make_shared<uhid::Device>(std::move(*dev));
-
-  _state->stop_repeat_thread = false;
-  _send_input_thread = std::thread([state = _state]() {
-    while (!state->stop_repeat_thread) {
-      send_report(*state);
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-  });
+  // Stop the pump + device event thread, swap the uhid device under mtx, restart
+  // the pump and wait for sysfs to repopulate — see uhid_joypad::recreate_device.
+  uhid_joypad::recreate_device<PS5JoypadState>(
+      _state, _send_input_thread,
+      [state = _state](const uhid_event &ev, int fd) { on_uhid_event(state, ev, fd); },
+      [](PS5JoypadState &s) { send_report(s); }, std::chrono::milliseconds(10),
+      [this]() { return get_sys_nodes(); }, "PS5");
 }
 
 static int scale_value(int input, int input_start, int input_end, int output_start, int output_end) {

@@ -121,7 +121,9 @@ void send_report(SwitchJoypadState &state) {
             reinterpret_cast<unsigned char *>(&report) + sizeof(report),
             &ev.u.input2.data[0]);
   ev.u.input2.size = sizeof(report);
-  state.dev->send(ev);
+  if (state.dev) {
+    state.dev->send(ev);
+  }
 }
 
 void send_subcmd_reply(
@@ -142,7 +144,9 @@ void send_subcmd_reply(
             reinterpret_cast<unsigned char *>(&report) + sizeof(report),
             &ev.u.input2.data[0]);
   ev.u.input2.size = sizeof(report);
-  state.dev->send(ev);
+  if (state.dev) {
+    state.dev->send(ev);
+  }
 }
 
 void handle_spi_flash_read(SwitchJoypadState &state, const uint8_t *request_data) {
@@ -361,56 +365,22 @@ Result<SwitchJoypad> SwitchJoypad::create(const DeviceDefinition &device) {
   // A real Pro Controller sends 0x30 reports at ~66Hz (~15ms interval).
   // Mirror that cadence so hid-nintendo's "dropped IMU reports" detection
   // doesn't flag a gap.
-  joypad._send_input_thread = std::thread([state = joypad._state]() {
-    while (!state->stop_repeat_thread) {
-      send_report(*state);
-      std::this_thread::sleep_for(std::chrono::milliseconds(15));
-    }
-  });
+  joypad._send_input_thread = uhid_joypad::start_report_pump<SwitchJoypadState>(
+      joypad._state, [](SwitchJoypadState &s) { send_report(s); }, std::chrono::milliseconds(15));
 
-  // Keep the node-discovery path simple and PS5-like by only returning the
-  // device once the kernel has exposed its input nodes in sysfs.
-  for (int attempt = 0; attempt < 20; ++attempt) {
-    if (!joypad.get_sys_nodes().empty()) {
-      return joypad;
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  }
-
+  // Only return once the kernel has exposed the device's input nodes in sysfs.
+  uhid_joypad::wait_for_sys_nodes([&joypad]() { return joypad.get_sys_nodes(); });
   return joypad;
 }
 
 void SwitchJoypad::recreate_device() {
-  if (!_state || !_state->dev) {
-    return;
-  }
-
-  // Mirror PS5Joypad::recreate_device(): stop the report pump, tear the device down so any stale fd in the
-  // previous container is invalidated (UHID_DESTROY), then rebuild with the same definition so node matching
-  // stays stable. on_rumble / controller_type / current button & stick state all live in _state and survive.
-  _state->stop_repeat_thread = true;
-  if (_send_input_thread.joinable()) {
-    _send_input_thread.join();
-  }
-
-  _state->dev->stop_thread();
-  _state->dev.reset();
-
-  auto dev =
-      uhid::Device::create(_state->def, [state = _state](uhid_event ev, int fd) { on_uhid_event(state, ev, fd); });
-  if (!dev) {
-    fprintf(stderr, "Unable to recreate Switch joypad device: %s\n", dev.getErrorMessage().c_str());
-    return;
-  }
-  _state->dev = std::make_shared<uhid::Device>(std::move(*dev));
-
-  _state->stop_repeat_thread = false;
-  _send_input_thread = std::thread([state = _state]() {
-    while (!state->stop_repeat_thread) {
-      send_report(*state);
-      std::this_thread::sleep_for(std::chrono::milliseconds(15));
-    }
-  });
+  // Stop the pump + device event thread, swap the uhid device under mtx, restart
+  // the pump and wait for sysfs to repopulate — see uhid_joypad::recreate_device.
+  uhid_joypad::recreate_device<SwitchJoypadState>(
+      _state, _send_input_thread,
+      [state = _state](const uhid_event &ev, int fd) { on_uhid_event(state, ev, fd); },
+      [](SwitchJoypadState &s) { send_report(s); }, std::chrono::milliseconds(15),
+      [this]() { return get_sys_nodes(); }, "Switch");
 }
 
 std::string SwitchJoypad::get_mac_address() const {
