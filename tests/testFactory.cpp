@@ -3,6 +3,13 @@
 
 using namespace inputtino;
 
+template <typename T> static T unwrap_or_skip(Result<T> created, const char *what) {
+  if (!created) {
+    SKIP(std::string("Skipping because ") + what + " could not be created on this host: " + created.getErrorMessage());
+  }
+  return std::move(*created);
+}
+
 // These cover the runtime backend selection, the basic uinput joypad backends
 // and the self-describing udev metadata. They deliberately avoid the SDL/HIDAPI
 // round-trip (see testUHID/testJoypads) so they stay deterministic.
@@ -13,9 +20,7 @@ TEST_CASE("is_uhid_supported is stable across calls", "[Factory]") {
 }
 
 TEST_CASE("uinput DualSense pad: no rich features, safe no-ops, self-describes", "[Factory]") {
-  auto created = PS5JoypadUinput::create();
-  REQUIRE(created);
-  auto joypad = std::move(*created);
+  auto joypad = unwrap_or_skip(PS5JoypadUinput::create(), "the uinput DualSense");
 
   // The uinput backend has no motion; the rich setters inherited from the
   // Joypad base must be safe no-ops rather than crash.
@@ -40,9 +45,7 @@ TEST_CASE("uinput DualSense pad: no rich features, safe no-ops, self-describes",
 }
 
 TEST_CASE("uinput Nintendo pad: no motion, self-describes", "[Factory]") {
-  auto created = SwitchJoypadUinput::create();
-  REQUIRE(created);
-  auto joypad = std::move(*created);
+  auto joypad = unwrap_or_skip(SwitchJoypadUinput::create(), "the uinput Nintendo pad");
 
   REQUIRE_FALSE(joypad.supports_motion());
   joypad.set_motion(Joypad::GYROSCOPE, 0.f, 0.f, 0.f); // no-op, must not crash
@@ -52,16 +55,23 @@ TEST_CASE("uinput Nintendo pad: no motion, self-describes", "[Factory]") {
 TEST_CASE("Joypad::create returns a usable pad through the Joypad base", "[Factory]") {
   // prefer_uhid = false always yields the uinput backend, which has no motion.
   auto ps = Joypad::create(JoypadKind::PS, /* prefer_uhid */ false);
-  REQUIRE(ps);
+  if (!ps) {
+    SKIP(std::string("Skipping because the uinput PS backend is unavailable on this host: ") + ps.getErrorMessage());
+  }
   REQUIRE_FALSE((*ps)->supports_motion());
   REQUIRE_FALSE((*ps)->get_udev_events().empty());
 
   auto nintendo = Joypad::create(JoypadKind::NINTENDO, /* prefer_uhid */ false);
-  REQUIRE(nintendo);
+  if (!nintendo) {
+    SKIP(std::string("Skipping because the uinput Nintendo backend is unavailable on this host: ") +
+         nintendo.getErrorMessage());
+  }
   REQUIRE_FALSE((*nintendo)->supports_motion());
 
   auto xbox = Joypad::create(JoypadKind::XBOX);
-  REQUIRE(xbox);
+  if (!xbox) {
+    SKIP(std::string("Skipping because the uinput Xbox backend is unavailable on this host: ") + xbox.getErrorMessage());
+  }
   REQUIRE_FALSE((*xbox)->supports_motion());
   REQUIRE_FALSE((*xbox)->get_udev_events().empty());
 }

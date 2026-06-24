@@ -553,7 +553,43 @@ void SwitchJoypad::set_on_rumble(const std::function<void(int low_freq, int high
 namespace {
 
 constexpr auto SWITCH_VENDOR_ID = "057e";
-constexpr auto SWITCH_PRODUCT_ID = "2009";
+
+struct SwitchIdentity {
+  const char *hid_name;
+  const char *hid_id;
+  const char *product_id;
+  const char *model;
+  const char *serial;
+};
+
+SwitchIdentity get_switch_identity(uint16_t product_id) {
+  switch (product_id) {
+  case uhid::JOYCON_PID_LEFT:
+    return {
+        .hid_name = "Joy-Con (L)",
+        .hid_id = "0005:0000057E:00002006",
+        .product_id = "2006",
+        .model = "Joy-Con_L",
+        .serial = "Nintendo_Joy-Con_L",
+    };
+  case uhid::JOYCON_PID_RIGHT:
+    return {
+        .hid_name = "Joy-Con (R)",
+        .hid_id = "0005:0000057E:00002007",
+        .product_id = "2007",
+        .model = "Joy-Con_R",
+        .serial = "Nintendo_Joy-Con_R",
+    };
+  default:
+    return {
+        .hid_name = "Pro Controller",
+        .hid_id = "0005:0000057E:00002009",
+        .product_id = "2009",
+        .model = "Pro_Controller",
+        .serial = "Nintendo_Pro_Controller",
+    };
+  }
+}
 
 std::string uppercase_ascii(std::string value) {
   std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
@@ -579,54 +615,63 @@ std::map<std::string, std::string> read_uevent_properties(const std::filesystem:
 }
 
 std::map<std::string, std::string> switch_input_identity(const std::filesystem::path &sys_entry,
-                                                         const std::string &fallback_uniq) {
+                                                         const std::string &fallback_uniq,
+                                                         uint16_t product_id) {
   auto props = read_uevent_properties(sys_entry / "uevent");
   const auto uniq = uppercase_ascii(props.count("UNIQ") ? props.at("UNIQ") : fallback_uniq);
+  const auto identity = get_switch_identity(product_id);
   return {
       {"UNIQ", uniq},
       {"HID_UNIQ", uniq},
       {"PHYS", props.count("PHYS") ? props.at("PHYS") : "bluetooth"},
-      {"MODALIAS", props.count("MODALIAS") ? props.at("MODALIAS") : "hid:b0005g0001v0000057Ep00002009"},
+      {"MODALIAS", props.count("MODALIAS") ? props.at("MODALIAS") : "hid:b0005g0001v0000057Ep0000" + std::string(identity.product_id)},
   };
 }
 
 std::map<std::string, std::string> switch_hid_identity(const std::filesystem::path &base_path,
-                                                       const std::string &fallback_uniq) {
+                                                       const std::string &fallback_uniq,
+                                                       uint16_t product_id) {
   auto props = read_uevent_properties(base_path / "uevent");
   const auto uniq = uppercase_ascii(props.count("HID_UNIQ") ? props.at("HID_UNIQ") : fallback_uniq);
+  const auto identity = get_switch_identity(product_id);
   return {
       {"HID_UNIQ", uniq},
       {"HID_PHYS", props.count("HID_PHYS") ? props.at("HID_PHYS") : "bluetooth"},
-      {"MODALIAS", props.count("MODALIAS") ? props.at("MODALIAS") : "hid:b0005g0001v0000057Ep00002009"},
+      {"MODALIAS", props.count("MODALIAS") ? props.at("MODALIAS") : "hid:b0005g0001v0000057Ep0000" + std::string(identity.product_id)},
   };
 }
 
-// Stamp the Switch Pro Bluetooth HID identity onto a udev event map.
+// Stamp the Nintendo Bluetooth HID identity for the active product onto a udev event map.
 void append_switch_identity(std::map<std::string, std::string> &event,
-                            const std::map<std::string, std::string> &identity) {
+                            const std::map<std::string, std::string> &identity,
+                            uint16_t product_id) {
+  const auto switch_identity = get_switch_identity(product_id);
   for (const auto &[key, value] : identity) {
     if (!value.empty()) {
       event[key] = value;
     }
   }
   event["ID_BUS"] = "bluetooth";
-  event["HID_NAME"] = "Pro Controller";
-  event["HID_ID"] = "0005:0000057E:00002009";
+  event["HID_NAME"] = switch_identity.hid_name;
+  event["HID_ID"] = switch_identity.hid_id;
   event["ID_VENDOR_ID"] = SWITCH_VENDOR_ID;
-  event["ID_MODEL_ID"] = SWITCH_PRODUCT_ID;
+  event["ID_MODEL_ID"] = switch_identity.product_id;
 }
 
 // Same identity, as hwdb "E:KEY=VALUE" rows appended to an entry.
-void append_switch_identity(std::vector<std::string> &entry, const std::map<std::string, std::string> &identity) {
+void append_switch_identity(std::vector<std::string> &entry,
+                            const std::map<std::string, std::string> &identity,
+                            uint16_t product_id) {
+  const auto switch_identity = get_switch_identity(product_id);
   std::vector<std::string> rows = {
       "E:ID_BUS=bluetooth",
-      "E:HID_NAME=Pro Controller",
-      "E:HID_ID=0005:0000057E:00002009",
+      std::string("E:HID_NAME=") + switch_identity.hid_name,
+      std::string("E:HID_ID=") + switch_identity.hid_id,
       "E:ID_VENDOR_ID=057e",
-      "E:ID_MODEL_ID=2009",
+      std::string("E:ID_MODEL_ID=") + switch_identity.product_id,
       "E:ID_VENDOR=Nintendo",
-      "E:ID_MODEL=Pro_Controller",
-      "E:ID_SERIAL=Nintendo_Pro_Controller",
+      std::string("E:ID_MODEL=") + switch_identity.model,
+      std::string("E:ID_SERIAL=") + switch_identity.serial,
   };
   for (const auto &[key, value] : identity) {
     if (!value.empty()) {
@@ -653,7 +698,7 @@ std::vector<Joypad::UdevEvent> SwitchJoypad::get_udev_events() const {
       sys_path.erase(0, 4); // strip leading /sys
       auto dev_path = ("/dev/input/" / sys_node.path().filename()).string();
       auto event = gen_udev_base_event(dev_path, sys_path);
-      auto identity = switch_input_identity(sys_entry, uniq);
+      auto identity = switch_input_identity(sys_entry, uniq, _state->product_id);
 
       std::ifstream name_file(std::filesystem::path(sys_entry) / "name");
       std::string name;
@@ -670,7 +715,7 @@ std::vector<Joypad::UdevEvent> SwitchJoypad::get_udev_events() const {
         event["ID_INPUT_JOYSTICK"] = "1";
         event[".INPUT_CLASS"] = "joystick";
       }
-      append_switch_identity(event, identity);
+      append_switch_identity(event, identity, _state->product_id);
       events.emplace_back(event);
     }
   }
@@ -684,7 +729,7 @@ std::vector<Joypad::UdevEvent> SwitchJoypad::get_udev_events() const {
         sys_path.erase(0, 4); // strip leading /sys
         auto event = gen_udev_base_event(dev_path, sys_path);
         event["SUBSYSTEM"] = "hidraw";
-        append_switch_identity(event, switch_hid_identity(base_path, uniq));
+        append_switch_identity(event, switch_hid_identity(base_path, uniq, _state->product_id), _state->product_id);
         events.emplace_back(event);
       }
     }
@@ -710,14 +755,14 @@ std::vector<Joypad::UdevHwDbEntry> SwitchJoypad::get_udev_hw_db_entries() const 
       std::ifstream name_file(std::filesystem::path(sys_entry) / "name");
       std::string name;
       std::getline(name_file, name);
-      auto identity = switch_input_identity(sys_entry, uniq);
+      auto identity = switch_input_identity(sys_entry, uniq, _state->product_id);
 
       if (name.find("Motion") != std::string::npos || name.find("IMU") != std::string::npos) {
         entry.second = {"E:ID_INPUT=1", "E:ID_INPUT_ACCELEROMETER=1", "G:seat", "G:uaccess", "Q:seat", "Q:uaccess", "V:1"};
       } else {
         entry.second = {"E:ID_INPUT=1", "E:ID_INPUT_JOYSTICK=1", "G:seat", "G:uaccess", "Q:seat", "Q:uaccess", "V:1"};
       }
-      append_switch_identity(entry.second, identity);
+      append_switch_identity(entry.second, identity, _state->product_id);
       result.emplace_back(entry);
     }
   }
@@ -729,7 +774,7 @@ std::vector<Joypad::UdevHwDbEntry> SwitchJoypad::get_udev_hw_db_entries() const 
       for (const auto &hidraw_entry : std::filesystem::directory_iterator{base_path / "hidraw"}) {
         auto dev_path = "/dev/" + hidraw_entry.path().filename().string();
         std::vector<std::string> rows = {"E:SUBSYSTEM=hidraw", "G:seat", "G:uaccess", "Q:seat", "Q:uaccess", "V:1"};
-        append_switch_identity(rows, switch_hid_identity(base_path, uniq));
+        append_switch_identity(rows, switch_hid_identity(base_path, uniq, _state->product_id), _state->product_id);
         result.push_back({gen_udev_hw_db_filename(dev_path), rows});
       }
     }

@@ -1,4 +1,5 @@
 #include "catch2/catch_all.hpp"
+#include <algorithm>
 #include <crc32.hpp>
 #include <fcntl.h>
 #include <filesystem>
@@ -93,6 +94,33 @@ static std::array<uint8_t, 3> report_left_stick(const std::vector<uint8_t> &repo
 
 static std::array<uint8_t, 3> report_right_stick(const std::vector<uint8_t> &report) {
   return {report[9], report[10], report[11]};
+}
+
+static bool has_udev_property(const std::vector<Joypad::UdevEvent> &events,
+                              const std::string &key,
+                              const std::string &value) {
+  for (const auto &event : events) {
+    auto it = event.find(key);
+    if (it != event.end() && it->second == value) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool has_hwdb_row(const std::vector<Joypad::UdevHwDbEntry> &entries, const std::string &row) {
+  for (const auto &entry : entries) {
+    if (std::find(entry.second.begin(), entry.second.end(), row) != entry.second.end()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static void require_uhid_support() {
+  if (!is_uhid_supported()) {
+    SKIP("This host has no accessible /dev/uhid");
+  }
 }
 
 static void flush_sdl_events() {
@@ -545,6 +573,7 @@ TEST_CASE_METHOD(SDLTestsFixture, "PS Joypad", "[SDL],[PS]") {
 }
 
 TEST_CASE("Switch Joypad raw HID reports", "[UHID],[Switch]") {
+  require_uhid_support();
   DeviceDefinition def = {
       .name = "Wolf Nintendo (virtual) pad",
       .vendor_id = 0x057E,
@@ -609,6 +638,7 @@ static std::vector<uint8_t> wait_for_right_stick(const std::filesystem::path &hi
 }
 
 TEST_CASE("Switch right stick raw HID all directions", "[UHID],[Switch]") {
+  require_uhid_support();
   DeviceDefinition def = {
       .name = "Wolf Nintendo (virtual) pad",
       .vendor_id = 0x057E,
@@ -663,6 +693,7 @@ TEST_CASE("Switch right stick raw HID all directions", "[UHID],[Switch]") {
 }
 
 TEST_CASE("Switch right stick sequential moves with re-centering", "[UHID],[Switch]") {
+  require_uhid_support();
   DeviceDefinition def = {
       .name = "Wolf Nintendo (virtual) pad",
       .vendor_id = 0x057E,
@@ -724,6 +755,7 @@ TEST_CASE("Switch right stick sequential moves with re-centering", "[UHID],[Swit
 }
 
 TEST_CASE("Switch right stick evdev round-trip all directions", "[UHID],[Switch]") {
+  require_uhid_support();
   // Use hidraw for directional verification — avoids SDL HIDAPI timing issues
   // between test cases while still proving the full kernel round-trip works.
   DeviceDefinition def = {
@@ -769,6 +801,7 @@ TEST_CASE("Switch right stick evdev round-trip all directions", "[UHID],[Switch]
 }
 
 TEST_CASE("Joy-Con Left creation and identity", "[UHID],[Switch],[JoyCon]") {
+  require_uhid_support();
   DeviceDefinition def = {
       .name = "Joy-Con (L)",
       .vendor_id = 0x057E,
@@ -779,6 +812,10 @@ TEST_CASE("Joy-Con Left creation and identity", "[UHID],[Switch],[JoyCon]") {
   std::this_thread::sleep_for(150ms);
 
   REQUIRE(joypad.get_product_id() == 0x2006);
+  REQUIRE(has_udev_property(joypad.get_udev_events(), "ID_MODEL_ID", "2006"));
+  REQUIRE(has_udev_property(joypad.get_udev_events(), "HID_NAME", "Joy-Con (L)"));
+  REQUIRE(has_hwdb_row(joypad.get_udev_hw_db_entries(), "E:ID_MODEL_ID=2006"));
+  REQUIRE(has_hwdb_row(joypad.get_udev_hw_db_entries(), "E:HID_NAME=Joy-Con (L)"));
 
   auto hidraw = wait_for_hidraw_by_uniq(joypad.get_mac_address(), def.vendor_id, def.product_id);
   REQUIRE_FALSE(hidraw.empty());
@@ -789,6 +826,7 @@ TEST_CASE("Joy-Con Left creation and identity", "[UHID],[Switch],[JoyCon]") {
 }
 
 TEST_CASE("Joy-Con Right creation and identity", "[UHID],[Switch],[JoyCon]") {
+  require_uhid_support();
   DeviceDefinition def = {
       .name = "Joy-Con (R)",
       .vendor_id = 0x057E,
@@ -799,6 +837,10 @@ TEST_CASE("Joy-Con Right creation and identity", "[UHID],[Switch],[JoyCon]") {
   std::this_thread::sleep_for(150ms);
 
   REQUIRE(joypad.get_product_id() == 0x2007);
+  REQUIRE(has_udev_property(joypad.get_udev_events(), "ID_MODEL_ID", "2007"));
+  REQUIRE(has_udev_property(joypad.get_udev_events(), "HID_NAME", "Joy-Con (R)"));
+  REQUIRE(has_hwdb_row(joypad.get_udev_hw_db_entries(), "E:ID_MODEL_ID=2007"));
+  REQUIRE(has_hwdb_row(joypad.get_udev_hw_db_entries(), "E:HID_NAME=Joy-Con (R)"));
 
   auto hidraw = wait_for_hidraw_by_uniq(joypad.get_mac_address(), def.vendor_id, def.product_id);
   REQUIRE_FALSE(hidraw.empty());
@@ -809,6 +851,7 @@ TEST_CASE("Joy-Con Right creation and identity", "[UHID],[Switch],[JoyCon]") {
 }
 
 TEST_CASE("Joy-Con sticks and buttons", "[UHID],[Switch],[JoyCon]") {
+  require_uhid_support();
   // Joy-Cons use the same HID report format as Pro Controller.
   // Verify a Joy-Con can send stick and button data correctly.
   DeviceDefinition def = {
@@ -848,6 +891,7 @@ TEST_CASE("Joy-Con sticks and buttons", "[UHID],[Switch],[JoyCon]") {
 }
 
 TEST_CASE("Pro Controller vs Joy-Con product IDs", "[UHID],[Switch],[JoyCon]") {
+  require_uhid_support();
   // Verify all three Nintendo controller types create with correct product IDs.
   auto pro = std::move(*SwitchJoypad::create({
       .name = "Pro Controller", .vendor_id = 0x057E, .product_id = 0x2009, .version = 0x8111}));

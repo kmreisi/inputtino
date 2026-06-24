@@ -88,18 +88,27 @@ void recreate_device(std::shared_ptr<State> &state,
   if (pump_thread.joinable()) {
     pump_thread.join();
   }
-  state->dev->stop_thread();
 
+  auto dev = uhid::Device::create(state->def, on_event);
+  if (!dev) {
+    fprintf(stderr, "Unable to recreate %s joypad device: %s\n", what, dev.getErrorMessage().c_str());
+    state->stop_repeat_thread = false;
+    pump_thread = start_report_pump<State>(state, std::move(send), interval);
+    return;
+  }
+
+  std::shared_ptr<uhid::Device> old_dev;
   {
     std::lock_guard<std::mutex> lock(state->mtx);
-    state->dev.reset();
-    auto dev = uhid::Device::create(state->def, on_event);
-    if (!dev) {
-      fprintf(stderr, "Unable to recreate %s joypad device: %s\n", what, dev.getErrorMessage().c_str());
-      return;
-    }
+    old_dev = state->dev;
     state->dev = std::make_shared<uhid::Device>(std::move(*dev));
   }
+
+  // Tear down the old device only after the replacement exists. If create()
+  // failed above we keep the original device alive and simply restart the pump,
+  // so recreate_device() remains retryable instead of bricking the joypad.
+  old_dev->stop_thread();
+  old_dev.reset();
 
   state->stop_repeat_thread = false;
   pump_thread = start_report_pump<State>(state, std::move(send), interval);
