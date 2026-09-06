@@ -253,6 +253,9 @@ void handle_output_report(std::shared_ptr<SwitchJoypadState> state, const uint8_
     handle_spi_flash_read(*state, subcmd_data);
     break;
   case uhid::SWITCH_SUBCMD_SET_PLAYER_LIGHTS:
+    if (state->on_player_leds) {
+      (*state->on_player_leds)(subcmd_data[0]);
+    }
     send_subcmd_reply(*state, uhid::SWITCH_ACK, subcmd_id, nullptr, 0);
     break;
   case uhid::SWITCH_SUBCMD_GET_PLAYER_LIGHTS: {
@@ -262,6 +265,12 @@ void handle_output_report(std::shared_ptr<SwitchJoypadState> state, const uint8_
     break;
   }
   case uhid::SWITCH_SUBCMD_SET_HOME_LIGHT:
+    if (state->on_home_light) {
+      // Simplified decode: byte 0's high nibble is the base intensity of the
+      // first mini-cycle; we don't decode the fade/flash cycle timing that
+      // follows.
+      (*state->on_home_light)((subcmd_data[0] >> 4) & 0x0F);
+    }
     send_subcmd_reply(*state, uhid::SWITCH_ACK, subcmd_id, nullptr, 0);
     break;
   default:
@@ -550,6 +559,14 @@ void SwitchJoypad::set_accel(float x, float y, float z) {
 
 void SwitchJoypad::set_on_rumble(const std::function<void(int low_freq, int high_freq)> &callback) {
   this->_state->on_rumble = callback;
+}
+
+void SwitchJoypad::set_on_player_leds(const std::function<void(uint8_t mask)> &callback) {
+  this->_state->on_player_leds = callback;
+}
+
+void SwitchJoypad::set_on_home_light(const std::function<void(uint8_t intensity)> &callback) {
+  this->_state->on_home_light = callback;
 }
 
 namespace {

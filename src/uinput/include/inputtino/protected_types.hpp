@@ -52,6 +52,7 @@ struct BaseJoypadState {
 
 struct XboxOneJoypadState : BaseJoypadState {};
 struct SwitchJoypadUinputState : BaseJoypadState {};
+struct GenericJoypadState : BaseJoypadState {};
 
 struct KeyboardState {
   std::thread repeat_press_t;
@@ -64,6 +65,15 @@ struct MouseState {
   libevdev_uinput_ptr mouse_rel = nullptr;
   libevdev_uinput_ptr mouse_abs = nullptr;
   bool absolute = false;
+
+  /**
+   * Legacy REL_WHEEL/REL_HWHEEL are one detent (multiple of 120) per event; a
+   * high-res delta smaller than 120 must accumulate across calls instead of
+   * truncating to 0, otherwise a client driving only sub-120 deltas (e.g. a
+   * touchpad-style trackball) never emits a legacy scroll event at all.
+   */
+  int legacy_scroll_remainder_v = 0;
+  int legacy_scroll_remainder_h = 0;
 };
 
 struct TouchScreenState {

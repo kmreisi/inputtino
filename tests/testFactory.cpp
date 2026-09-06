@@ -67,6 +67,31 @@ TEST_CASE("Joypad::create returns a usable pad through the Joypad base", "[Facto
   REQUIRE_FALSE((*xbox)->get_udev_events().empty());
 }
 
+TEST_CASE("uinput generic pad: no motion, self-describes", "[Factory]") {
+  auto created = GenericJoypad::create();
+  REQUIRE(created);
+  auto joypad = std::move(*created);
+
+  REQUIRE_FALSE(joypad.supports_motion());
+  joypad.set_pressed_buttons(Joypad::A | Joypad::DPAD_UP);
+  joypad.set_stick(Joypad::LS, 100, -200);
+  joypad.set_triggers(10, 20);
+  REQUIRE_FALSE(joypad.get_udev_events().empty());
+}
+
+TEST_CASE("Joypad::create routes PS4/GENERIC without prefer_uhid", "[Factory]") {
+  // No dedicated DS4 uinput backend: TYPE::PS4 falls back to the generic PS
+  // uinput pad (see host_capability.cpp), so it has no motion either.
+  auto ps4 = Joypad::create(Joypad::TYPE::PS4, /* prefer_uhid */ false);
+  REQUIRE(ps4);
+  REQUIRE_FALSE((*ps4)->supports_motion());
+  REQUIRE_FALSE((*ps4)->get_udev_events().empty());
+
+  auto generic = Joypad::create(Joypad::TYPE::GENERIC, /* prefer_uhid */ false);
+  REQUIRE(generic);
+  REQUIRE_FALSE((*generic)->get_udev_events().empty());
+}
+
 TEST_CASE("Joypad::create routes Joy-Con L/R through the Nintendo backend", "[Factory]") {
   // Deterministic uinput path: the new enum values just have to route through
   // the factory (no "unknown Joypad::TYPE") and produce a self-describing pad.
@@ -111,5 +136,45 @@ TEST_CASE("Joypad::create gives Joy-Con L/R the right hid-nintendo product id", 
   auto *swr = dynamic_cast<SwitchJoypad *>((*right).get());
   REQUIRE(swr != nullptr);
   REQUIRE(swr->get_product_id() == 0x2007);
+}
+
+TEST_CASE("Joypad::create picks the rich uhid Xbox backend when preferred", "[Factory][UHID]") {
+  if (!is_uhid_supported()) {
+    SKIP("This host has no accessible /dev/uhid");
+  }
+
+  auto xbox = Joypad::create(Joypad::TYPE::XBOX, /* prefer_uhid */ true);
+  REQUIRE(xbox);
+  auto *rich = dynamic_cast<XboxJoypad *>((*xbox).get());
+  REQUIRE(rich != nullptr);
+  REQUIRE_FALSE(rich->get_udev_events().empty());
+
+  rich->set_on_rumble([](int, int) {});
+  rich->set_on_trigger_rumble([](int, int) {});
+  rich->set_pressed_buttons(Joypad::A | Joypad::DPAD_UP | Joypad::HOME);
+  rich->set_stick(Joypad::LS, 100, -200);
+  rich->set_triggers(10, 20);
+  rich->set_battery(Joypad::BATTERY_FULL, 100);
+}
+
+TEST_CASE("Joypad::create picks the rich uhid DS4 backend when preferred", "[Factory][UHID]") {
+  if (!is_uhid_supported()) {
+    SKIP("This host has no accessible /dev/uhid");
+  }
+
+  auto ps4 = Joypad::create(Joypad::TYPE::PS4, /* prefer_uhid */ true);
+  REQUIRE(ps4);
+  auto *ds4 = dynamic_cast<DS4Joypad *>((*ps4).get());
+  REQUIRE(ds4 != nullptr);
+  REQUIRE_FALSE(ds4->get_udev_events().empty());
+
+  // Rumble/LED/touch must round-trip through the base Joypad API without crashing.
+  ds4->set_on_rumble([](int, int) {});
+  ds4->set_on_led([](int, int, int) {});
+  ds4->set_pressed_buttons(Joypad::A | Joypad::DPAD_UP);
+  ds4->set_stick(Joypad::LS, 100, -200);
+  ds4->set_triggers(10, 20);
+  ds4->place_finger(0, 500, 500);
+  ds4->release_finger(0);
 }
 #endif

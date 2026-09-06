@@ -205,7 +205,9 @@ void Mouse::release(Mouse::MOUSE_BUTTON button) {
 }
 
 void Mouse::horizontal_scroll(int high_res_distance) {
-  int distance = high_res_distance / 120;
+  _state->legacy_scroll_remainder_h += high_res_distance;
+  int distance = _state->legacy_scroll_remainder_h / 120;
+  _state->legacy_scroll_remainder_h -= distance * 120;
 
   if (auto mouse = active_mouse_device(_state.get())) {
     libevdev_uinput_write_event(mouse, EV_REL, REL_HWHEEL, distance);
@@ -215,7 +217,9 @@ void Mouse::horizontal_scroll(int high_res_distance) {
 }
 
 void Mouse::vertical_scroll(int high_res_distance) {
-  int distance = high_res_distance / 120;
+  _state->legacy_scroll_remainder_v += high_res_distance;
+  int distance = _state->legacy_scroll_remainder_v / 120;
+  _state->legacy_scroll_remainder_v -= distance * 120;
 
   if (auto mouse = active_mouse_device(_state.get())) {
     libevdev_uinput_write_event(mouse, EV_REL, REL_WHEEL, distance);

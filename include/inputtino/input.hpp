@@ -323,7 +323,9 @@ public:
     PS,
     NINTENDO,
     JOYCON_LEFT,
-    JOYCON_RIGHT
+    JOYCON_RIGHT,
+    PS4,
+    GENERIC
   };
 
   enum CONTROLLER_BTN : unsigned int {
@@ -464,6 +466,13 @@ public:
   virtual void set_battery(BATTERY_STATE /* state */, int /* percentage */) {}
   virtual void set_on_led(const std::function<void(int r, int g, int b)> & /* callback */) {}
   virtual void set_on_trigger_effect(const std::function<void(const TriggerEffect &)> & /* callback */) {}
+
+  /**
+   * Independent left/right trigger ("impulse") rumble, as exposed by Xbox
+   * controllers alongside the ordinary two-motor set_on_rumble(). Values are
+   * 0-0xFFFF, matching set_on_rumble()'s convention.
+   */
+  virtual void set_on_trigger_rumble(const std::function<void(int left, int right)> & /* callback */) {}
 };
 
 class XboxOneJoypad : public Joypad {
@@ -495,6 +504,47 @@ protected:
 
 private:
   XboxOneJoypad();
+};
+
+/**
+ * A rich uhid Xbox One/Series pad: real Xbox Wireless Controller Bluetooth
+ * HID identity (buttons, sticks, triggers, hat, battery, independent
+ * trigger-rumble) — see src/uhid/joypad_xbox.cpp. Falls back to
+ * XboxOneJoypad (uinput) when /dev/uhid isn't available.
+ */
+class XboxJoypad : public Joypad {
+public:
+  static Result<XboxJoypad>
+  create(const DeviceDefinition &device = {
+             .name = "Wolf X-Box Wireless (virtual) pad", .vendor_id = 0x045E, .product_id = 0x0B13, .version = 0x0513});
+  XboxJoypad(XboxJoypad &&j) noexcept : _state(nullptr) {
+    std::swap(j._state, _state);
+    std::swap(j._send_input_thread, _send_input_thread);
+  }
+  ~XboxJoypad() override;
+
+  std::vector<std::string> get_nodes() const override;
+  std::vector<UdevEvent> get_udev_events() const override;
+  std::vector<UdevHwDbEntry> get_udev_hw_db_entries() const override;
+
+  std::string get_mac_address() const;
+  std::vector<std::string> get_sys_nodes() const;
+
+  void set_pressed_buttons(unsigned int newly_pressed) override;
+  void set_triggers(int16_t left, int16_t right) override;
+  void set_stick(STICK_POSITION stick_type, short x, short y) override;
+  void set_on_rumble(const std::function<void(int low_freq, int high_freq)> &callback) override;
+  void set_on_trigger_rumble(const std::function<void(int left, int right)> &callback) override;
+  void set_battery(BATTERY_STATE state, int percentage) override;
+
+protected:
+  typedef struct XboxJoypadState XboxJoypadState;
+  std::shared_ptr<XboxJoypadState> _state;
+
+private:
+  std::thread _send_input_thread;
+
+  XboxJoypad(uint16_t vendor_id, uint16_t product_id, const Mac &mac, bool include_share_button);
 };
 
 class SwitchJoypad : public Joypad {
@@ -539,6 +589,22 @@ public:
    */
   void set_accel(float x, float y, float z) override;
   void set_on_rumble(const std::function<void(int low_freq, int high_freq)> &callback) override;
+
+  /**
+   * Fired when the host sets the 4 player indicator LEDs (Set Player Lights,
+   * subcommand 0x30). `mask` is the raw on/off nibble: bit N (0-3) set means
+   * player light N+1 is lit.
+   */
+  void set_on_player_leds(const std::function<void(uint8_t mask)> &callback);
+
+  /**
+   * Fired when the host sets the HOME button light (Set HOME Light,
+   * subcommand 0x38). This is a simplified decode: real HOME-light commands
+   * describe a mini-cycle animation (fade/flash timing); we only forward the
+   * base intensity nibble (0-15) of the first cycle since no consumer needs
+   * the animation, only "is the HOME LED lit and how bright".
+   */
+  void set_on_home_light(const std::function<void(uint8_t intensity)> &callback);
 
 protected:
   typedef struct SwitchJoypadState SwitchJoypadState;
@@ -692,6 +758,83 @@ protected:
 
 private:
   SwitchJoypadUinput();
+};
+
+/**
+ * A rich uhid DualShock4 (PS4) pad: buttons, sticks, triggers, rumble, RGB
+ * lightbar and touchpad. Bluetooth-only (mirrors PS5Joypad, which shares the
+ * same "TODO: expose USB" simplification) — see src/uhid/joypad_ds4.cpp.
+ * No adaptive triggers, motion, player LEDs or battery-percentage reporting:
+ * DS4 hardware doesn't have adaptive triggers, and the others aren't wired up
+ * yet (battery always reports "full" like PS5Joypad's default).
+ */
+class DS4Joypad : public Joypad {
+public:
+  static Result<DS4Joypad>
+  create(const DeviceDefinition &device = {
+             .name = "Wolf DualShock 4 (virtual) pad", .vendor_id = 0x054C, .product_id = 0x05C4, .version = 0x0100});
+  DS4Joypad(DS4Joypad &&j) noexcept : _state(nullptr) {
+    std::swap(j._state, _state);
+    std::swap(j._send_input_thread, _send_input_thread);
+  }
+  ~DS4Joypad() override;
+
+  std::vector<std::string> get_nodes() const override;
+  std::vector<UdevEvent> get_udev_events() const override;
+  std::vector<UdevHwDbEntry> get_udev_hw_db_entries() const override;
+
+  std::string get_mac_address() const;
+  std::vector<std::string> get_sys_nodes() const;
+
+  void set_pressed_buttons(unsigned int newly_pressed) override;
+  void set_triggers(int16_t left, int16_t right) override;
+  void set_stick(STICK_POSITION stick_type, short x, short y) override;
+  void set_on_rumble(const std::function<void(int low_freq, int high_freq)> &callback) override;
+  void set_on_led(const std::function<void(int r, int g, int b)> &callback) override;
+
+  void place_finger(int finger_nr, uint16_t x, uint16_t y) override;
+  void release_finger(int finger_nr) override;
+
+protected:
+  typedef struct DS4JoypadState DS4JoypadState;
+  std::shared_ptr<DS4JoypadState> _state;
+
+private:
+  std::thread _send_input_thread;
+
+  DS4Joypad(uint16_t vendor_id, const Mac &mac);
+};
+
+/**
+ * Basic uinput generic HID gamepad: buttons, sticks, triggers and rumble
+ * only, no per-vendor identity. uinput-only (no uhid backend — libvirtualhid,
+ * this pad's inspiration, doesn't have one for its generic profile either).
+ */
+class GenericJoypad : public Joypad {
+public:
+  static Result<GenericJoypad>
+  create(const DeviceDefinition &device = {
+             .name = "Wolf Generic (virtual) pad", .vendor_id = 0x1209, .product_id = 0x0001, .version = 0x0100});
+  GenericJoypad(GenericJoypad &&j) noexcept : _state(nullptr) {
+    std::swap(j._state, _state);
+  }
+  ~GenericJoypad() override;
+
+  std::vector<std::string> get_nodes() const override;
+  std::vector<UdevEvent> get_udev_events() const override;
+  std::vector<UdevHwDbEntry> get_udev_hw_db_entries() const override;
+
+  void set_pressed_buttons(unsigned int newly_pressed) override;
+  void set_triggers(int16_t left, int16_t right) override;
+  void set_stick(STICK_POSITION stick_type, short x, short y) override;
+  void set_on_rumble(const std::function<void(int low_freq, int high_freq)> &callback) override;
+
+protected:
+  typedef struct GenericJoypadState GenericJoypadState;
+  std::shared_ptr<GenericJoypadState> _state;
+
+private:
+  GenericJoypad();
 };
 
 } // namespace inputtino

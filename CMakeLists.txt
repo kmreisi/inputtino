@@ -117,6 +117,7 @@ if (UNIX AND NOT APPLE)
             "src/uinput/joypad_xbox.cpp"
             "src/uinput/joypad_ps.cpp"
             "src/uinput/joypad_nintendo.cpp"
+            "src/uinput/joypad_generic.cpp"
             "src/uinput/keyboard.cpp"
             "src/uinput/mouse.cpp"
             "src/uinput/pentablet.cpp"
@@ -131,6 +132,8 @@ if (UNIX AND NOT APPLE)
         message("Building uhid joypads (PS5Joypad / SwitchJoypad) alongside the uinput fallbacks")
         list(APPEND SRC_LIST "src/uhid/joypad_ps5.cpp" "src/uhid/uhid.cpp")
         list(APPEND SRC_LIST "src/uhid/joypad_switch.cpp")
+        list(APPEND SRC_LIST "src/uhid/joypad_ds4.cpp")
+        list(APPEND SRC_LIST "src/uhid/joypad_xbox.cpp")
         target_include_directories(libinputtino PUBLIC "src/uhid/include/")
         target_compile_definitions(libinputtino PRIVATE INPUTTINO_USE_UHID)
     else ()

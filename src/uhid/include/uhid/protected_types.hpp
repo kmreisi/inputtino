@@ -2,10 +2,12 @@
 #include <functional>
 #include <inputtino/input.hpp>
 #include <optional>
+#include <uhid/ds4.hpp>
 #include <uhid/joypad_common.hpp>
 #include <uhid/ps5.hpp>
 #include <uhid/switch.hpp>
 #include <uhid/uhid.hpp>
+#include <uhid/xbox.hpp>
 
 namespace inputtino {
 // dev / def / mtx / stop_repeat_thread live in uhid_joypad::CommonState, shared
@@ -28,6 +30,8 @@ struct SwitchJoypadState : uhid_joypad::CommonState {
   bool imu_enabled = false;
   bool vibration_enabled = false;
   std::optional<std::function<void(int, int)>> on_rumble = std::nullopt;
+  std::optional<std::function<void(uint8_t mask)>> on_player_leds = std::nullopt;
+  std::optional<std::function<void(uint8_t intensity)>> on_home_light = std::nullopt;
 };
 
 struct PS5JoypadState : uhid_joypad::CommonState {
@@ -46,5 +50,29 @@ struct PS5JoypadState : uhid_joypad::CommonState {
   uint32_t last_right_trigger_event = 0;
 
   bool is_bluetooth = true;
+};
+
+struct DS4JoypadState : uhid_joypad::CommonState {
+  Mac mac;
+  uint16_t vendor_id;
+
+  uhid::ds4_input_report_bt current_state = {};
+  uint8_t last_touch_id = 0;
+
+  std::optional<std::function<void(int, int)>> on_rumble = std::nullopt;
+  std::optional<std::function<void(int, int, int)>> on_led = std::nullopt;
+};
+
+struct XboxJoypadState : uhid_joypad::CommonState {
+  Mac mac;
+  uint16_t vendor_id;
+  uint16_t product_id;
+  bool include_share_button = false;
+  bool has_battery = false;
+
+  uhid::xbox_input_report current_state = {};
+
+  std::optional<std::function<void(int, int)>> on_rumble = std::nullopt;
+  std::optional<std::function<void(int, int)>> on_trigger_rumble = std::nullopt;
 };
 } // namespace inputtino
