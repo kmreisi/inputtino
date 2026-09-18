@@ -442,4 +442,58 @@ TEST_CASE("virtual pen tablet", "[LIBINPUT]") {
         REQUIRE(libinput_event_tablet_tool_get_button(t_event) == BTN_STYLUS);
         REQUIRE(libinput_event_tablet_tool_get_button_state(t_event) == LIBINPUT_BUTTON_STATE_RELEASED);
     }
+
+    { // Lifting the tip whilst staying in proximity
+        tablet.place_tool(PenTablet::PEN, 0.1, 0.2, 0.5, -1.0, 0, 0);
+        event = get_event(li);
+        REQUIRE(libinput_event_get_type(event.get()) == LIBINPUT_EVENT_TABLET_TOOL_TIP);
+        REQUIRE(libinput_event_tablet_tool_get_tip_state(libinput_event_get_tablet_tool_event(event.get())) ==
+                LIBINPUT_TABLET_TOOL_TIP_DOWN);
+
+        tablet.release_tool();
+        event = get_event(li);
+        REQUIRE(libinput_event_get_type(event.get()) == LIBINPUT_EVENT_TABLET_TOOL_TIP);
+        auto t_event = libinput_event_get_tablet_tool_event(event.get());
+        REQUIRE(libinput_event_tablet_tool_get_tip_state(t_event) == LIBINPUT_TABLET_TOOL_TIP_UP);
+        REQUIRE_THAT(libinput_event_tablet_tool_get_pressure(t_event), WithinAbs(0.0, 0.01));
+        // ...and the tool is still in proximity
+        REQUIRE(libinput_event_tablet_tool_get_proximity_state(t_event) == LIBINPUT_TABLET_TOOL_PROXIMITY_STATE_IN);
+    }
+
+    { // Leaving proximity has to be reported as a proximity out event
+        tablet.leave_proximity();
+        event = get_event(li);
+        REQUIRE(libinput_event_get_type(event.get()) == LIBINPUT_EVENT_TABLET_TOOL_PROXIMITY);
+        auto t_event = libinput_event_get_tablet_tool_event(event.get());
+        REQUIRE(libinput_event_tablet_tool_get_proximity_state(t_event) == LIBINPUT_TABLET_TOOL_PROXIMITY_STATE_OUT);
+        REQUIRE(libinput_tablet_tool_get_type(libinput_event_tablet_tool_get_tool(t_event)) ==
+                LIBINPUT_TABLET_TOOL_TYPE_PEN);
+
+        // A second leave_proximity() is a no-op (no tool is in proximity anymore)
+        tablet.leave_proximity();
+        tablet.place_tool(PenTablet::PEN, 0.1, 0.2, -1, 0.5, 0, 0);
+        event = get_event(li);
+        REQUIRE(libinput_event_get_type(event.get()) == LIBINPUT_EVENT_TABLET_TOOL_PROXIMITY);
+        REQUIRE(libinput_event_tablet_tool_get_proximity_state(libinput_event_get_tablet_tool_event(event.get())) ==
+                LIBINPUT_TABLET_TOOL_PROXIMITY_STATE_IN);
+    }
+
+    { // Switching tool: libinput ignores a tool change whilst another tool is in proximity, so the pen has
+      // to leave proximity before the eraser can come in - place_tool() takes care of that.
+        tablet.place_tool(PenTablet::ERASER, 0.1, 0.2, -1, 0.5, 0, 0);
+
+        event = get_event(li);
+        REQUIRE(libinput_event_get_type(event.get()) == LIBINPUT_EVENT_TABLET_TOOL_PROXIMITY);
+        auto out_event = libinput_event_get_tablet_tool_event(event.get());
+        REQUIRE(libinput_event_tablet_tool_get_proximity_state(out_event) == LIBINPUT_TABLET_TOOL_PROXIMITY_STATE_OUT);
+        REQUIRE(libinput_tablet_tool_get_type(libinput_event_tablet_tool_get_tool(out_event)) ==
+                LIBINPUT_TABLET_TOOL_TYPE_PEN);
+
+        event = get_event(li);
+        REQUIRE(libinput_event_get_type(event.get()) == LIBINPUT_EVENT_TABLET_TOOL_PROXIMITY);
+        auto in_event = libinput_event_get_tablet_tool_event(event.get());
+        REQUIRE(libinput_event_tablet_tool_get_proximity_state(in_event) == LIBINPUT_TABLET_TOOL_PROXIMITY_STATE_IN);
+        REQUIRE(libinput_tablet_tool_get_type(libinput_event_tablet_tool_get_tool(in_event)) ==
+                LIBINPUT_TABLET_TOOL_TYPE_ERASER);
+    }
 }

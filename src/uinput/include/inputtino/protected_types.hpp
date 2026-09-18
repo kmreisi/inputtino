@@ -35,7 +35,12 @@ static std::vector<libevdev_event_ptr> fetch_events(int uinput_fd, int max_event
 
 struct PenTabletState {
   libevdev_uinput_ptr pen_tablet = nullptr;
+  /* The tool that is currently in proximity, SAME_AS_BEFORE when no tool is in proximity */
   PenTablet::TOOL_TYPE last_tool = PenTablet::SAME_AS_BEFORE;
+  /* Whether the tip is currently reported as touching the surface (BTN_TOUCH) */
+  bool is_touching = false;
+  /* Which of the tool buttons are currently held down, so that they can be released on proximity out */
+  bool btn_pressed[3] = {false, false, false};
 };
 
 struct BaseJoypadState {

@@ -36,6 +36,18 @@ void inputtino_pen_tablet_place_tool(InputtinoPenTablet *pen_tablet,
   }
 }
 
+void inputtino_pen_tablet_release_tool(InputtinoPenTablet *pen_tablet) {
+  if (pen_tablet) {
+    reinterpret_cast<inputtino::PenTablet *>(pen_tablet)->release_tool();
+  }
+}
+
+void inputtino_pen_tablet_leave_proximity(InputtinoPenTablet *pen_tablet) {
+  if (pen_tablet) {
+    reinterpret_cast<inputtino::PenTablet *>(pen_tablet)->leave_proximity();
+  }
+}
+
 void inputtino_pen_tablet_set_button(InputtinoPenTablet *pen_tablet, enum INPUTTINO_PEN_BTN_TYPE button, bool pressed) {
   if (pen_tablet) {
     reinterpret_cast<inputtino::PenTablet *>(pen_tablet)->set_btn(inputtino::PenTablet::BTN_TYPE(button), pressed);

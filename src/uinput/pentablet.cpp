@@ -109,15 +109,60 @@ static inline float deg2rad(float degree) {
   return M_PI * degree / 180.0;
 }
 
+/**
+ * Ends the current event frame; libinput only looks at the device state once a SYN_REPORT arrives.
+ */
+static inline void sync_frame(libevdev_uinput *tablet) {
+  libevdev_uinput_write_event(tablet, EV_SYN, SYN_REPORT, 0);
+}
+
+/**
+ * Reports the tip as no longer touching (if it was) without ending the frame.
+ */
+static void write_tip_up(libevdev_uinput *tablet, PenTabletState &state) {
+  if (state.is_touching) {
+    libevdev_uinput_write_event(tablet, EV_KEY, BTN_TOUCH, 0);
+    state.is_touching = false;
+  }
+  libevdev_uinput_write_event(tablet, EV_ABS, ABS_PRESSURE, 0);
+}
+
+/**
+ * Takes the tool that is currently in proximity out of proximity, without ending the frame.
+ * Returns false when no tool was in proximity (nothing was written).
+ */
+static bool write_proximity_out(libevdev_uinput *tablet, PenTabletState &state) {
+  if (state.last_tool == PenTablet::SAME_AS_BEFORE) {
+    return false;
+  }
+  write_tip_up(tablet, state);
+  // A tool that goes out of proximity can't be holding any of its buttons
+  for (const auto &[btn, code] : btn_to_linux) {
+    if (state.btn_pressed[btn]) {
+      libevdev_uinput_write_event(tablet, EV_KEY, code, 0);
+      state.btn_pressed[btn] = false;
+    }
+  }
+  libevdev_uinput_write_event(tablet, EV_KEY, tool_to_linux.at(state.last_tool), 0);
+  state.last_tool = PenTablet::SAME_AS_BEFORE;
+  return true;
+}
+
 void PenTablet::place_tool(
     PenTablet::TOOL_TYPE tool_type, float x, float y, float pressure, float distance, float tilt_x, float tilt_y) {
   if (auto tablet = _state->pen_tablet.get()) {
+    if (tool_type == PenTablet::SAME_AS_BEFORE && _state->last_tool == PenTablet::SAME_AS_BEFORE) {
+      // No tool is in proximity, so "same as before" can't be honoured: something has to come into
+      // proximity or libinput will discard every axis we report. Assume the most common tool.
+      tool_type = PenTablet::PEN;
+    }
     if (tool_type != PenTablet::SAME_AS_BEFORE && tool_type != _state->last_tool) {
+      // libinput ignores a tool change while another tool is still in proximity, so the old tool has to
+      // leave proximity in its own event frame before the new one can come in.
+      if (write_proximity_out(tablet, *_state)) {
+        sync_frame(tablet);
+      }
       libevdev_uinput_write_event(tablet, EV_KEY, tool_to_linux.at(tool_type), 1);
-
-      if (_state->last_tool != PenTablet::SAME_AS_BEFORE)
-        libevdev_uinput_write_event(tablet, EV_KEY, tool_to_linux.at(_state->last_tool), 0);
-
       _state->last_tool = tool_type;
     }
 
@@ -131,13 +176,17 @@ void PenTablet::place_tool(
       libevdev_uinput_write_event(tablet, EV_ABS, ABS_PRESSURE, scaled_pressure);
       // when there's pressure, the tool must be touching the tablet
       libevdev_uinput_write_event(tablet, EV_ABS, ABS_DISTANCE, 0);
+      if (!_state->is_touching) {
+        libevdev_uinput_write_event(tablet, EV_KEY, BTN_TOUCH, 1);
+        _state->is_touching = true;
+      }
     }
 
     if (distance >= 0) {
       int scaled_distance = (int)std::lround(distance * DISTANCE_MAX);
       libevdev_uinput_write_event(tablet, EV_ABS, ABS_DISTANCE, scaled_distance);
       // when there's distance, the tool can't be touching the tablet
-      libevdev_uinput_write_event(tablet, EV_ABS, ABS_PRESSURE, 0);
+      write_tip_up(tablet, *_state);
     }
 
     auto scaled_tilt_x = std::clamp(tilt_x, -90.0f, 90.0f);
@@ -152,10 +201,29 @@ void PenTablet::place_tool(
   }
 }
 
+void PenTablet::release_tool() {
+  if (auto tablet = _state->pen_tablet.get()) {
+    write_tip_up(tablet, *_state);
+    sync_frame(tablet);
+  }
+}
+
+void PenTablet::leave_proximity() {
+  if (auto tablet = _state->pen_tablet.get()) {
+    if (write_proximity_out(tablet, *_state)) {
+      sync_frame(tablet);
+    }
+  }
+}
+
 void PenTablet::set_btn(PenTablet::BTN_TYPE btn, bool pressed) {
   if (auto tablet = _state->pen_tablet.get()) {
+    if (_state->btn_pressed[btn] == pressed) {
+      return; // Edge triggered: the kernel drops repeated EV_KEY values anyway
+    }
+    _state->btn_pressed[btn] = pressed;
     libevdev_uinput_write_event(tablet, EV_KEY, btn_to_linux.at(btn), pressed ? 1 : 0);
-    libevdev_uinput_write_event(tablet, EV_SYN, SYN_REPORT, 0);
+    sync_frame(tablet);
   }
 }
 

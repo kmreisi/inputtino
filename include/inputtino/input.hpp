@@ -262,10 +262,27 @@ public:
    *
    * tilt_x and tilt_y are in the range [-90.0, 90.0] degrees.
    *
+   * Placing a tool also brings it into proximity; when the tool type changes the previous tool is first
+   * taken out of proximity (in its own event frame), since libinput ignores a tool change that happens
+   * while another tool is still in proximity.
+   *
    * Refer to the libinput docs to better understand what each param means:
    * https://wayland.freedesktop.org/libinput/doc/latest/tablet-support.html#special-axes-on-tablet-tools
    */
   void place_tool(TOOL_TYPE tool_type, float x, float y, float pressure, float distance, float tilt_x, float tilt_y);
+
+  /**
+   * Lifts the tip off the surface without leaving proximity: reports BTN_TOUCH 0 and zero pressure.
+   * This is what should be sent when the stylus stops touching but keeps hovering.
+   */
+  void release_tool();
+
+  /**
+   * Takes the currently active tool out of proximity (libinput will report a proximity out event):
+   * lifts the tip, releases any tool button that is still held and reports BTN_TOOL_* 0.
+   * A following place_tool() brings the tool back into proximity.
+   */
+  void leave_proximity();
 
   void set_btn(BTN_TYPE btn, bool pressed);
 

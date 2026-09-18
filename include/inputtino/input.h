@@ -135,6 +135,12 @@ LIBINPUTTINO_EXPORT void inputtino_pen_tablet_place_tool(InputtinoPenTablet *pen
                                             float tilt_x,
                                             float tilt_y);
 
+/* Lifts the tip off the surface (zero pressure) without leaving proximity */
+LIBINPUTTINO_EXPORT void inputtino_pen_tablet_release_tool(InputtinoPenTablet *pen_tablet);
+
+/* Takes the currently active tool out of proximity */
+LIBINPUTTINO_EXPORT void inputtino_pen_tablet_leave_proximity(InputtinoPenTablet *pen_tablet);
+
 enum INPUTTINO_PEN_BTN_TYPE {
   PRIMARY,
   SECONDARY,
